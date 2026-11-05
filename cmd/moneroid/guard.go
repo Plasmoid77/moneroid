@@ -139,7 +139,8 @@ type executor struct {
 func (e *executor) locked(f func()) {
 	unlock, err := guard.Lock(guard.LockFile, true)
 	if err != nil {
-		fmt.Println("lock:", err)
+		fmt.Println("action skipped, lock:", err) // fail closed: never act unserialized
+		return
 	}
 	defer unlock()
 	f()
@@ -226,12 +227,11 @@ func (e *executor) repair(ctx context.Context, now time.Time) {
 		return
 	}
 	p := e.cfg.Services.P2Pool
+	e.pending = true // from here on resume() makes sure P2Pool runs again
 	if e.control(ctx, "stop", p) != nil || !stopped(e.state(ctx, p)) {
 		fmt.Println("repair aborted: P2Pool did not stop; nothing was moved")
-		e.save("done")
 		return
 	}
-	e.pending = true
 	if err := guard.MoveCacheAside(guard.DataDir); err != nil {
 		fmt.Println("repair: moving the cache aside:", err)
 	} else {

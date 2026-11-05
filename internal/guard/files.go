@@ -44,8 +44,9 @@ func WriteFile(path, content string) error {
 	}
 	tmp := f.Name()
 	_, werr := f.WriteString(content)
+	merr := f.Chmod(0o644) // through the descriptor: a swapped name cannot redirect it
 	cerr := f.Close()
-	if err := errors.Join(werr, cerr, os.Chmod(tmp, 0o644)); err != nil {
+	if err := errors.Join(werr, merr, cerr); err != nil {
 		os.Remove(tmp)
 		return err
 	}
@@ -55,6 +56,9 @@ func WriteFile(path, content string) error {
 	}
 	return nil
 }
+
+// ErrHoldNotCleared means the caller must not perform the XMRig operation.
+var ErrHoldNotCleared = errors.New("the guard hold could not be cleared")
 
 // Manual wraps a user's start/stop/restart (CLI and TUI): under the lock it
 // removes the hold marker when XMRig is among units, so the guard never undoes
@@ -77,7 +81,9 @@ func Manual(units []string, xmrigUnit string) (cleared bool, done func(), err er
 		cleared = true
 	case errors.Is(rerr, fs.ErrNotExist):
 	default:
-		err = errors.Join(err, rerr)
+		// The hold could not be cancelled: acting now would let the guard undo it.
+		unlock()
+		return false, func() {}, errors.Join(err, rerr, ErrHoldNotCleared)
 	}
 	return cleared, unlock, err
 }

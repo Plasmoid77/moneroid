@@ -4,6 +4,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -130,8 +131,11 @@ func (m Model) control(verb string, units []string) tea.Cmd {
 	return func() tea.Msg {
 		// GUARD-04: a manual XMRig operation cancels the guard's hold.
 		if live {
-			_, done, _ := guard.Manual(units, xmrigUnit)
+			_, done, err := guard.Manual(units, xmrigUnit)
 			defer done()
+			if errors.Is(err, guard.ErrHoldNotCleared) {
+				return opMsg{text: verb + " refused: " + err.Error() + "; run through sudo"}
+			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()

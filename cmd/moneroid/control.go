@@ -58,8 +58,11 @@ func cmdControl(cfgPath, verb string, args []string) int {
 	if cleared {
 		fmt.Println("guard hold cleared: the guard will not start XMRig on its own")
 	}
-	if herr != nil {
-		fmt.Fprintf(os.Stderr, "warning: guard hold: %v; run through sudo\n", herr)
+	if errors.Is(herr, guard.ErrHoldNotCleared) {
+		fmt.Fprintf(os.Stderr, "guard hold: %v; run through sudo\n", herr)
+		return exitDenied
+	} else if herr != nil {
+		fmt.Fprintf(os.Stderr, "warning: guard hold: %v\n", herr)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
