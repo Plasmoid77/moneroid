@@ -1,0 +1,41 @@
+[Unit]
+Description=Moneroid guard: holds XMRig while P2Pool is not synced, repairs an isolated sidechain
+Documentation=https://github.com/Plasmoid77/moneroid/blob/main/docs/spec.md
+After=moneroid-p2pool.service moneroid-xmrig.service
+
+[Service]
+Type=exec
+# root: it starts/stops the two units (no polkit needed) and, for a repair, renames
+# two files in the P2Pool state directory (0700 moneroid-p2pool) - hence the only
+# capability kept. Everything else on the filesystem is read-only (GUARD-07).
+User=root
+Group=moneroid
+ExecStart=/usr/local/bin/moneroid guard
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+AmbientCapabilities=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=-/var/lib/moneroid/p2pool
+# The hold marker (GUARD-05): readable by the operator group, kept across guard restarts.
+RuntimeDirectory=moneroid-guard
+RuntimeDirectoryMode=0775
+RuntimeDirectoryPreserve=restart
+StateDirectory=moneroid/guard
+StateDirectoryMode=0750
+UMask=0022
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

@@ -32,6 +32,7 @@ func cmdDoctor(cfgPath string, args []string) int {
 		XMRig:     &xmrig.Client{HTTP: xmrig.NewHTTPClient(status.ReadTimeout), BaseURL: cfg.XMRig.APIURL, Token: token},
 		Now:       time.Now,
 		Monotonic: status.Monotonic,
+		HeldFile:  status.GuardHeldFile,
 	}
 	snap := c.Collect(context.Background())
 	rep := doctor.Run(context.Background(), cfg, snap, systemd.ExecRunner)

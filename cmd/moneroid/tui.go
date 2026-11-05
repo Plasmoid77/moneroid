@@ -36,6 +36,7 @@ func cmdTUI(cfgPath string, args []string) int {
 		XMRig:     &xmrig.Client{HTTP: xmrig.NewHTTPClient(status.ReadTimeout), BaseURL: cfg.XMRig.APIURL, Token: token},
 		Now:       time.Now,
 		Monotonic: status.Monotonic,
+		HeldFile:  status.GuardHeldFile,
 	}
 	if err := tui.Run(tui.New(cfg, c, version)); err != nil {
 		fmt.Fprintln(os.Stderr, "tui:", err)

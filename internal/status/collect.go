@@ -40,6 +40,8 @@ type Collector struct {
 	XMRig     *xmrig.Client
 	Now       func() time.Time
 	Monotonic func() time.Duration
+	// HeldFile is the guard hold marker (GuardHeldFile); empty skips the check.
+	HeldFile string
 }
 
 // Collect never fails: every problem is recorded in Sources and Health.
@@ -85,6 +87,9 @@ func (c *Collector) Collect(ctx context.Context) *Snapshot {
 	c.applySystemd(s, props, perr, now, mono)
 	c.applyXMRig(s, sum, xerr, now)
 	c.applyP2Pool(s, files, now)
+	if c.HeldFile != "" {
+		s.Guard = ReadHeld(c.HeldFile)
+	}
 	Evaluate(s)
 	s.CollectionDurationMs = c.Now().Sub(start).Milliseconds()
 	return s
@@ -193,7 +198,8 @@ func (c *Collector) applyP2Pool(s *Snapshot, files map[string]p2pool.File, now t
 		m.P2PConnections = r.Int("connections")
 		m.P2PIncomingConnections = r.Int("incoming_connections")
 		m.PeerListSize = r.Int("peer_list_size")
-		m.PeerMaxHeight = peerMaxHeight(o)
+		m.PeerHeights = peerHeights(o)
+		m.PeerMaxHeight = maxHeight(m.PeerHeights)
 		m.UptimeSeconds = r.Int("uptime")
 		m.ZMQAgeAtWriteSeconds = r.Int("zmq_last_active")
 		if m.ZMQAgeAtWriteSeconds != nil && p2p.AgeSeconds != nil {
@@ -302,14 +308,14 @@ func (c *Collector) p2poolSession(s *Snapshot, fileUptime *int64, fileAge *float
 	return ""
 }
 
-// peerMaxHeight reads the height field of `local/p2p` peer strings
+// peerHeights reads the height field of `local/p2p` peer strings
 // ("O,44,94,P2Pool v4.9.1,14795198,84.196.182.49:37888"); nil when absent.
-func peerMaxHeight(o jsonx.Object) *int64 {
+func peerHeights(o jsonx.Object) []int64 {
 	v, ok := o["peers"].([]any)
 	if !ok {
 		return nil
 	}
-	var max int64 = -1
+	var hs []int64
 	for _, p := range v {
 		s, ok := p.(string)
 		if !ok {
@@ -319,12 +325,22 @@ func peerMaxHeight(o jsonx.Object) *int64 {
 		if len(f) < 5 {
 			continue
 		}
-		if h, err := strconv.ParseInt(f[4], 10, 64); err == nil && h > max {
-			max = h
+		if h, err := strconv.ParseInt(f[4], 10, 64); err == nil && h >= 0 {
+			hs = append(hs, h)
 		}
 	}
-	if max < 0 {
+	return hs
+}
+
+func maxHeight(hs []int64) *int64 {
+	if len(hs) == 0 {
 		return nil
+	}
+	max := hs[0]
+	for _, h := range hs[1:] {
+		if h > max {
+			max = h
+		}
 	}
 	return &max
 }
@@ -430,4 +446,25 @@ func sanitize(s string) string {
 		}
 	}
 	return s
+}
+
+// ReadHeld parses the guard hold marker ("reason=CODE since=RFC3339"); nil when absent.
+func ReadHeld(path string) *GuardState {
+	b, err := os.ReadFile(path)
+	if err != nil || len(b) > 4096 {
+		return nil
+	}
+	g := &GuardState{Held: true}
+	for _, f := range strings.Fields(string(b)) {
+		k, v, _ := strings.Cut(f, "=")
+		switch k {
+		case "reason":
+			g.Reason = sanitize(v)
+		case "since":
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				g.Since = tp(t.UTC())
+			}
+		}
+	}
+	return g
 }

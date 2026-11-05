@@ -77,7 +77,10 @@ func TestRewrite(t *testing.T) {
 	if p := ReadParams([]byte(out + "socks5 = 127.0.0.1:1080\n")); p.Node.Host != "new.example" || p.Node.RPC != 18089 || p.Node.ZMQ != 18083 || p.Socks5 != "127.0.0.1:1080" {
 		t.Fatalf("read back %+v", p)
 	}
-	if p := ReadParams(nil); p.Node.Host != "127.0.0.1" || p.Node.RPC != 18081 || p.Socks5 != "" {
+	if p := ReadParams([]byte("data-dir = /var/lib/moneroid/p2pool # cache here\n")); p.DataDir != "/var/lib/moneroid/p2pool" {
+		t.Fatalf("data-dir %q", p.DataDir)
+	}
+	if p := ReadParams(nil); p.Node.Host != "127.0.0.1" || p.Node.RPC != 18081 || p.Socks5 != "" || p.DataDir != "" {
 		t.Fatalf("defaults %+v", p)
 	}
 	if d := Diff([]byte(in), []byte(out)); len(d) != 5 {

@@ -28,7 +28,7 @@ install -o root -g moneroid -m 0640 examples/p2pool.conf  /etc/moneroid/p2pool.c
 install -o root -g moneroid -m 0640 examples/xmrig.json   /etc/moneroid/xmrig.json
 install -o root -g root      -m 0644 examples/moneroid.toml /etc/moneroid/moneroid.toml
 install -o root -g root      -m 0644 examples/nodes.txt    /etc/moneroid/nodes.txt
-install -o root -g root -m 0644 systemd/moneroid-p2pool.service systemd/moneroid-xmrig.service /etc/systemd/system/
+install -o root -g root -m 0644 systemd/moneroid-p2pool.service systemd/moneroid-xmrig.service systemd/moneroid-guard.service /etc/systemd/system/
 install -o root -g root -m 0755 moneroid /usr/local/bin/moneroid
 systemctl daemon-reload
 usermod -aG moneroid OPERATOR      # reads the Data API; log in again afterwards
@@ -56,6 +56,7 @@ moneroid start             # or sudo moneroid start; P2Pool syncs the sidechain 
 moneroid status
 moneroid logs --follow p2pool   # "SideChain SYNCHRONIZED", no repeated "ZMQReader disconnected"
 systemctl enable moneroid-p2pool.service moneroid-xmrig.service   # autostart after boot
+systemctl enable --now moneroid-guard.service                     # optional: hold XMRig while P2Pool is not synced (spec §7.1)
 ```
 
 `start` returns as soon as the processes are launched; sync and the first shares show in `status`/`logs`, not in the exit code.
@@ -100,4 +101,4 @@ Hugepages are reliably applied only at boot (on a running system memory is fragm
 
 ## Rollback
 
-`sh install.sh --uninstall` stops and disables the two units, removes the unit files, the polkit rule, the sysctl file, the MSR unit, the i2pd tunnel and the binaries; `--purge` also removes `/etc/moneroid`, `/var/lib/moneroid`, the users and the group.
+`sh install.sh --uninstall` stops and disables the guard and the two units, removes the unit files, the polkit rule, the sysctl file, the MSR unit, the i2pd tunnel and the binaries; `--purge` also removes `/etc/moneroid`, `/var/lib/moneroid`, the users and the group.

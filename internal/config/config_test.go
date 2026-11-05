@@ -32,6 +32,9 @@ func TestLoadGood(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if g := c.Guard; g.IntervalS != 30 || g.HoldAfter != 3 || g.ReleaseAfter != 3 || !g.Repair || g.RepairAfterS != 1200 || g.RepairCooldownS != 3600 {
+		t.Fatalf("guard defaults %+v", g)
+	}
 	if c.UI.RefreshMs != 1000 || c.Services.P2Pool != "moneroid-p2pool.service" {
 		t.Fatalf("unexpected config %+v", c)
 	}
@@ -52,6 +55,11 @@ func TestLoadBad(t *testing.T) {
 		"empty id":       strings.Replace(good, `expected_id = "moneroid-xmrig"`, `expected_id = ""`, 1),
 		"refresh low":    good + "[ui]\nrefresh_ms = 100\n",
 		"refresh string": good + "[ui]\nrefresh_ms = \"1000\"\n",
+		"guard interval": good + "[guard]\ninterval_s = 5\n",
+		"guard hold":     good + "[guard]\nhold_after = 0\n",
+		"guard repair":   good + "[guard]\nrepair_after_s = 60\n",
+		"guard cooldown": good + "[guard]\nrepair_after_s = 1200\nrepair_cooldown_s = 600\n",
+		"guard unknown":  good + "[guard]\nenabled = true\n",
 	}
 	for name, s := range cases {
 		if _, err := Load(write(t, s)); err == nil {

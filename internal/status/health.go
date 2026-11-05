@@ -38,6 +38,11 @@ func Evaluate(s *Snapshot) {
 		s.Health.Level = LevelStopped
 	case transitional(p) || transitional(x):
 		s.Health.Level = LevelStarting
+	case p.ActiveState == "active" && inactive(x) && s.Guard != nil:
+		// GUARD-05: the guard stopped XMRig on purpose; show why P2Pool is not ready.
+		s.Health.Level = LevelDegraded
+		s.addIssue("GUARD_HOLD", "warning", "xmrig", "", fmt.Sprintf("moneroid guard holds %s until P2Pool is ready (reason %s)", x.Unit, s.Guard.Reason))
+		p2poolRuntime(s, func() {}, func() {})
 	case p.ActiveState == "active" && inactive(x), x.ActiveState == "active" && inactive(p):
 		s.Health.Level = LevelDegraded
 		for _, sv := range []*Service{p, x} {
@@ -87,6 +92,12 @@ func runtimeLevel(s *Snapshot) string {
 		}
 	}
 
+	p2poolRuntime(s, degrade, unknown)
+	return level
+}
+
+// p2poolRuntime adds the P2Pool part of H-03; it does not depend on XMRig.
+func p2poolRuntime(s *Snapshot, degrade, unknown func()) {
 	ps := s.Sources[SrcP2PoolP2P]
 	switch {
 	case ps.State == StateStale:
@@ -118,7 +129,6 @@ func runtimeLevel(s *Snapshot) string {
 			degrade()
 		}
 	}
-	return level
 }
 
 func inactive(sv *Service) bool { return sv.ActiveState == "inactive" }

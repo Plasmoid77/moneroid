@@ -4,6 +4,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Plasmoid77/moneroid/internal/config"
+	"github.com/Plasmoid77/moneroid/internal/guard"
 	"github.com/Plasmoid77/moneroid/internal/payouts"
 	"github.com/Plasmoid77/moneroid/internal/status"
 	"github.com/Plasmoid77/moneroid/internal/systemd"
@@ -125,8 +127,16 @@ func (m Model) collect() tea.Cmd {
 }
 
 func (m Model) control(verb string, units []string) tea.Cmd {
-	run := m.run
+	run, live, xmrigUnit := m.run, m.collector != nil && m.collector.HeldFile != "", m.cfg.Services.XMRig
 	return func() tea.Msg {
+		// GUARD-04: a manual XMRig operation cancels the guard's hold.
+		if live {
+			_, done, err := guard.Manual(units, xmrigUnit)
+			defer done()
+			if errors.Is(err, guard.ErrHoldNotCleared) {
+				return opMsg{text: verb + " refused: " + err.Error() + "; run through sudo"}
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 		if err := systemd.Control(ctx, run, verb, units...); err != nil {

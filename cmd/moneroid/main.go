@@ -33,6 +33,7 @@ const usage = `Usage:
   moneroid [--config PATH] node list [--json]
   moneroid [--config PATH] node select [--dry-run]
   moneroid [--config PATH] config path
+  moneroid [--config PATH] guard        (run by moneroid-guard.service)
   moneroid version
   moneroid --help
 
@@ -98,6 +99,8 @@ func run(args []string) int {
 		return cmdPayouts(*cfgPath, rest[1:])
 	case "tui":
 		return cmdTUI(*cfgPath, rest[1:])
+	case "guard":
+		return cmdGuard(*cfgPath, rest[1:])
 	}
 	fmt.Fprintf(os.Stderr, "unknown command %q\n%s", rest[0], usage)
 	return exitUsage
@@ -141,6 +144,7 @@ func cmdStatus(cfgPath string, args []string) int {
 		XMRig:     &xmrig.Client{HTTP: xmrig.NewHTTPClient(status.ReadTimeout), BaseURL: cfg.XMRig.APIURL, Token: token},
 		Now:       time.Now,
 		Monotonic: status.Monotonic,
+		HeldFile:  status.GuardHeldFile,
 	}
 	snap := c.Collect(context.Background())
 	if *asJSON {

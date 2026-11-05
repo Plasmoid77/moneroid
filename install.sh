@@ -5,7 +5,7 @@
 #
 #   sh install.sh --wallet 4…                       # mini sidechain, node picked from nodes.txt
 #   sh install.sh --wallet 4… --node HOST:RPC:ZMQ   # fixed Monero node
-#   sh install.sh --wallet 4… --enable --hugepages  # autostart + sysctl/MSR tuning
+#   sh install.sh --wallet 4… --enable --hugepages  # autostart (incl. moneroid-guard) + sysctl/MSR tuning
 #   sh install.sh --wallet 4… --i2p --node LAN_IP:RPC:ZMQ   # P2Pool p2p over I2P (i2pd); node must be private or .b32.i2p
 #   sh install.sh --uninstall [--purge]             # remove services (and configs/state with --purge)
 #
@@ -62,8 +62,9 @@ command -v systemctl >/dev/null || die "systemd is required"
 
 UNITS="moneroid-p2pool.service moneroid-xmrig.service"
 if [ $UNINSTALL = 1 ]; then
-	for u in $UNITS moneroid-msr.service; do systemctl disable --now "$u" 2>/dev/null || true; done # one missing unit must not skip the rest
-	rm -f /etc/systemd/system/moneroid-p2pool.service /etc/systemd/system/moneroid-xmrig.service \
+	# The guard goes first so it cannot restart what is being removed.
+	for u in moneroid-guard.service $UNITS moneroid-msr.service; do systemctl disable --now "$u" 2>/dev/null || true; done # one missing unit must not skip the rest
+	rm -f /etc/systemd/system/moneroid-guard.service /etc/systemd/system/moneroid-p2pool.service /etc/systemd/system/moneroid-xmrig.service \
 		/etc/systemd/system/moneroid-msr.service /etc/polkit-1/rules.d/50-moneroid.rules \
 		/etc/sysctl.d/90-moneroid-hugepages.conf /usr/local/bin/moneroid /usr/local/bin/p2pool /usr/local/bin/xmrig
 	systemctl daemon-reload
@@ -135,7 +136,7 @@ install -o root -g root -m 0755 moneroid /usr/local/bin/moneroid
 install -o root -g root -m 0755 p2pool /usr/local/bin/p2pool
 install -o root -g root -m 0755 xmrig /usr/local/bin/xmrig
 install -d -o root -g root -m 0755 /etc/moneroid
-install -o root -g root -m 0644 systemd/moneroid-p2pool.service systemd/moneroid-xmrig.service /etc/systemd/system/
+install -o root -g root -m 0644 systemd/moneroid-p2pool.service systemd/moneroid-xmrig.service systemd/moneroid-guard.service /etc/systemd/system/
 if [ -d /etc/polkit-1/rules.d ]; then install -o root -g root -m 0644 examples/polkit/50-moneroid.rules /etc/polkit-1/rules.d/
 else echo "note: polkit without rules.d (< 0.106): start/stop need sudo"; fi
 
@@ -219,6 +220,9 @@ if [ $FRESH = 1 ] && [ -z "$NODE" ] && [ $I2P = 0 ]; then
 	moneroid node select || echo "no usable node found; set host/rpc-port/zmq-port in /etc/moneroid/p2pool.conf and run: moneroid start"
 fi
 if systemctl is-active -q moneroid-p2pool.service moneroid-xmrig.service; then moneroid restart; else moneroid start; fi
-if [ $ENABLE = 1 ]; then systemctl enable -q $UNITS && echo "autostart enabled"; fi
+if [ $ENABLE = 1 ]; then systemctl enable -q $UNITS moneroid-guard.service && echo "autostart enabled"; fi
+# The guard keeps XMRig stopped while P2Pool is not synced; an upgrade restarts it, --enable starts it.
+if systemctl is-active -q moneroid-guard.service; then systemctl restart moneroid-guard.service
+elif [ $ENABLE = 1 ]; then systemctl start moneroid-guard.service; fi
 echo; moneroid doctor || true
 echo; echo "done: moneroid status | moneroid tui | moneroid logs --follow p2pool  (sidechain sync takes a few minutes)"

@@ -32,7 +32,7 @@ Low-maintenance goal: changes to algorithms, consensus and optimizations stay in
 | Linux x86_64, the system systemd instance | Windows/macOS, other init systems, systemd user units |
 | One local pair of services, arbitrary service names | Several stacks at once, managing remote machines |
 | CLI and an interactive TUI, English commands and labels | Web/GUI, interface localization |
-| `status`, JSON, `start/stop/restart`, `logs`, `doctor` | An own daemon, supervisor, restart scheduler |
+| `status`, JSON, `start/stop/restart`, `logs`, `doctor`; the optional `moneroid guard` (§7.1, owner decision 2026-11-05) | Any other daemon, supervisor or restart scheduler |
 | Native configs and installation by exact instructions (by hand or `install.sh`) | A binary downloader inside the tool, auto-update, building the miners, an install wizard |
 | A ready local or remote Monero node; node choice from an editable candidate list by latency (§6.1) | Installing, syncing and managing `monerod`; a built-in node list, background node switching |
 | Observing the chosen upstream sidechain | Choosing the chain by profitability, own share/payout logic |
@@ -262,6 +262,26 @@ SYS-09. At most one control operation runs inside one Moneroid process at a time
 SYS-10. Foreign units keep their existing dependency semantics. The exact guarantees of SYS-03/04 hold for the shipped units; `doctor` warns about differing dependencies and a missing `After`. Moneroid does not rewrite foreign units.
 
 SYS-11. The P2Pool unit sets `RuntimeDirectory=moneroid-p2pool-api`, `RuntimeDirectoryPreserve=no`, `RuntimeDirectoryMode=0750`; the persistent directories are `StateDirectory=moneroid/p2pool` and `moneroid/xmrig` (0700). Systemd creates the temporary directory at start and removes it at stop; the persistent upstream cache/peers stay in `/var/lib/moneroid/p2pool`. For foreign units without this profile the freshness and the link of the files to the current process need a separate check; no proof means unknown.
+
+### 7.1. Guard
+
+Owner decision 2026-11-05: P2Pool can come up on its own isolated sidechain (after a restart with an unreachable node or a stale cache) and XMRig then hashes for nothing, silently. The guard is the one sanctioned exception to "no daemon" (§2). It never replaces systemd: it only stops/starts the two units and, rarely, moves P2Pool's cache aside.
+
+GUARD-01. `moneroid guard` is a long-running loop run by `moneroid-guard.service` (root, `CapabilityBoundingSet=CAP_DAC_OVERRIDE`, `ProtectSystem=strict`, `ReadWritePaths=-/var/lib/moneroid/p2pool`, `RuntimeDirectory=moneroid-guard` 0775 group `moneroid` with `RuntimeDirectoryPreserve=restart`, `StateDirectory=moneroid/guard`). Optional: without the unit Moneroid behaves as before. `install.sh` installs the unit always and enables/starts it with `--enable`; `--uninstall` stops it first. A timer + oneshot was rejected: the hysteresis counters live between polls, and a loop with `Restart=on-failure` is the simpler mechanism.
+
+GUARD-02. Every `[guard] interval_s` (default 30) it builds the same snapshot as `status` and classifies P2Pool alone, independently of XMRig's state: `Skip` (P2Pool unit not active or systemd unreadable — no decision), `Ready`, or `NotReady` with the first failing reason in this order: `SOURCE_STALE`, `P2P_UNTRUSTED` (local/p2p missing/invalid, from a previous run, unknown session or clock), `P2P_NO_CONNECTIONS`, `ZMQ_ACTIVITY_OLD`, `POOL_STATS_UNKNOWN` (pool/stats missing or older than 180 s), `PEERS_UNKNOWN`, `SIDECHAIN_BEHIND` (highest connected peer more than 100 blocks ahead).
+
+GUARD-03. Hysteresis: `NotReady` for `hold_after` (3) consecutive polls while XMRig is active → hold: write the marker, `systemctl stop` XMRig. `Ready` for `release_after` (3) consecutive polls with a marker present → `systemctl start` XMRig, remove the marker. A `Ready` poll counts only when local/p2p was rewritten since the previous counted poll; `NotReady` counts every poll. Exposure at boot (both units start together) is bounded by `hold_after × interval_s` (~90 s) — accepted.
+
+GUARD-04. The marker `/run/moneroid-guard/held` (`reason=CODE since=RFC3339`) is the only hold state. The guard starts XMRig only while the marker exists, and creates it only for an XMRig that is running (an XMRig the user stopped is never adopted, not even by a repair). `moneroid start|stop|restart` and the TUI remove it whenever they act on XMRig, so the guard never undoes a user decision; a bare `systemctl stop moneroid-xmrig` does not — stop the guard too, or use `moneroid stop`. Both sides serialize on `flock(/run/moneroid-guard/lock)` (created by the guard; regular files only, no symlinks), and the guard re-reads the live unit state and the marker under the lock before every action. The marker and the state file are written through exclusively created temporary files. Locking fails closed: the guard skips an action it cannot lock, and the CLI/TUI refuse an XMRig operation whose hold they cannot clear. Known limit: a manual `moneroid stop p2pool` while a repair waits to confirm P2Pool running is undone by the next poll.
+
+GUARD-05. `status`, `tui` and `doctor` read the marker: with P2Pool active and XMRig inactive they report `GUARD_HOLD` (warning) instead of `UNIT_NOT_ACTIVE`, plus the P2Pool runtime issues that explain the hold; JSON gains `guard {held, reason, since}` (field added, schema_version unchanged).
+
+GUARD-06. Repair (`[guard] repair`, default on) runs only when all hold: reason `SIDECHAIN_BEHIND` continuously for `repair_after_s` (1200), P2Pool uptime ≥ `repair_after_s`, at least 3 connected peers ahead, the gap not shrinking since the incident began, no repair yet in this incident (it ends at the first `Ready`), and `repair_cooldown_s` (3600) since the last attempt (persisted in `/var/lib/moneroid/guard/last-repair`). Node, ZMQ and peer failures never trigger it — a cache reset cannot fix them. Sequence: record `<time> pending`, hold XMRig, stop P2Pool, confirm it is inactive (otherwise abort, nothing moved), rename `p2pool.cache` and `p2pool_peers.txt` to `*.guard-old` (one previous copy), start P2Pool and confirm it is active, record `<time> done`. Until that confirmation the record stays `pending` and every poll (also after a guard restart) starts P2Pool again. The record also keeps `open|closed`: whether the current incident already had its repair, so a guard restart grants no second one. XMRig stays held until GUARD-03 releases it; a failure to hold it aborts the repair before P2Pool is touched.
+
+GUARD-07. Repair is refused at guard start (logged, hold logic stays) unless `params_file` sets `data-dir = /var/lib/moneroid/p2pool`, the one writable path of the unit. File operations go through `os.Root` on that directory, so symlinks cannot redirect them.
+
+GUARD-08. The guard logs one line per verdict change and per action to the journal (`moneroid logs` does not include it: `journalctl -u moneroid-guard`), never one per poll.
 
 ## 8. Permissions and safe operation
 

@@ -16,3 +16,11 @@ expected_id = "moneroid-xmrig"
 
 [ui]
 refresh_ms = 1000
+
+# [guard]                    # moneroid-guard.service; every key is optional (spec §7.1)
+# interval_s = 30            # poll period, 10..600
+# hold_after = 3             # not-ready polls before XMRig is stopped
+# release_after = 3          # ready polls before XMRig is started again
+# repair = true              # reset an isolated sidechain (needs data-dir = /var/lib/moneroid/p2pool in p2pool.conf)
+# repair_after_s = 1200      # how long P2Pool must stay behind its peers without catching up
+# repair_cooldown_s = 3600   # minimum time between two repairs

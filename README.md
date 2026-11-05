@@ -23,11 +23,12 @@ Status: v1 is implemented and verified on Arch Linux (systemd 261), Debian 13 (s
 | `moneroid doctor [--json]` | 31 checks: units, dependencies, permissions, APIs, freshness, node |
 | `moneroid payouts [--json] [--since TIME]` | Payouts from the P2Pool journal: time, amount, block, total; the wallet address is never printed |
 | `moneroid node list` / `node select [--dry-run]` | Probes the nodes from `nodes.txt` (RPC latency, sync, ZMQ port); `select` rewrites `host/rpc-port/zmq-port` in `p2pool.conf` |
+| `moneroid guard` | Run by the optional `moneroid-guard.service`: keeps XMRig stopped while P2Pool is not synced with its sidechain (or has no peers/node), starts it again when P2Pool is ready, and resets an isolated sidechain cache automatically ([spec §7.1](docs/spec.md)). Log: `journalctl -u moneroid-guard` |
 | `moneroid config path`, `version` | Utilities |
 
 `status` and `tui` use the Monero colours (orange/white; red only for problems); in a pipe or with `NO_COLOR=1` the output is plain text, and the meaning is always in the text.
 
-Boundaries (deliberate): no binary installer inside the tool, no auto-updates, no database, no web UI, no `monerod` management, no multiple stacks, no kernel/MSR/hugepages tuning inside the tool. The full list is in the [spec](docs/spec.md).
+Boundaries (deliberate): no daemon except the optional guard, no binary installer inside the tool, no auto-updates, no database, no web UI, no `monerod` management, no multiple stacks, no kernel/MSR/hugepages tuning inside the tool. The full list is in the [spec](docs/spec.md).
 
 ## Requirements
 
@@ -56,6 +57,7 @@ Manually, step by step (or from source: `make build`, Go 1.27) — [docs/install
 - `status`, `tui`, `doctor`, `logs` — a regular user in group `moneroid` (reads the Data API and configs) plus `systemd-journal`/`wheel` for the journal.
 - `start/stop/restart` — through `sudo` or the optional polkit rule `examples/polkit/50-moneroid.rules` (two units only, start/stop/restart only, group `moneroid` only).
 - `node select` writes `p2pool.conf` → `sudo`.
+- `moneroid-guard.service` runs as root with a single capability (`CAP_DAC_OVERRIDE`) and a read-only filesystem except the P2Pool state directory; `moneroid start|stop xmrig` cancels its hold (through `sudo` when the operator is not in group `moneroid`).
 - The Data API directory contains `local/console` with the cookie of the P2Pool TCP console: read access to the directory equals control of P2Pool, hence a single group.
 
 ## How it works and how to maintain it

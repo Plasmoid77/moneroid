@@ -43,6 +43,8 @@ type Snapshot struct {
 	XMRig                XMRigMetrics      `json:"xmrig"`
 	P2Pool               P2PoolMetrics     `json:"p2pool"`
 	Health               Health            `json:"health"`
+	// Guard is present only while `moneroid guard` holds XMRig (GUARD-05).
+	Guard *GuardState `json:"guard,omitempty"`
 	// Props keeps the raw systemctl properties for doctor; not serialized.
 	Props map[string]map[string]string `json:"-"`
 }
@@ -102,6 +104,7 @@ type P2PoolMetrics struct {
 	P2PIncomingConnections *int64     `json:"p2p_incoming_connections"`
 	PeerListSize           *int64     `json:"peer_list_size"`
 	PeerMaxHeight          *int64     `json:"peer_max_height"` // highest sidechain height reported by connected peers
+	PeerHeights            []int64    `json:"-"`               // every reported peer height, for the guard
 	UptimeSeconds          *int64     `json:"uptime_seconds"`
 	ZMQAgeAtWriteSeconds   *int64     `json:"zmq_age_at_write_seconds"`
 	ZMQAgeSeconds          *float64   `json:"zmq_age_seconds"`
@@ -122,6 +125,16 @@ type P2PoolMetrics struct {
 	SidechainDifficulty    *float64   `json:"sidechain_difficulty"`
 	Sidechain              *string    `json:"sidechain"`
 	SyncState              string     `json:"sync_state"`
+}
+
+// GuardHeldFile is the hold marker of moneroid-guard.service (GUARD-05).
+const GuardHeldFile = "/run/moneroid-guard/held"
+
+// GuardState is the content of the hold marker.
+type GuardState struct {
+	Held   bool       `json:"held"`
+	Reason string     `json:"reason"`
+	Since  *time.Time `json:"since"`
 }
 
 type Health struct {

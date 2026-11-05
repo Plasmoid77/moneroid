@@ -36,6 +36,17 @@ type Config struct {
 	UI struct {
 		RefreshMs int `toml:"refresh_ms"`
 	} `toml:"ui"`
+	Guard Guard `toml:"guard"`
+}
+
+// Guard tunes `moneroid guard` (GUARD-01..08). Every key is optional.
+type Guard struct {
+	IntervalS       int  `toml:"interval_s"`
+	HoldAfter       int  `toml:"hold_after"`
+	ReleaseAfter    int  `toml:"release_after"`
+	Repair          bool `toml:"repair"`
+	RepairAfterS    int  `toml:"repair_after_s"`
+	RepairCooldownS int  `toml:"repair_cooldown_s"`
 }
 
 var unitRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.@:-]*\.service$`)
@@ -44,6 +55,7 @@ var unitRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.@:-]*\.service$`)
 func Load(path string) (*Config, error) {
 	var c Config
 	c.UI.RefreshMs = 1000
+	c.Guard = Guard{IntervalS: 30, HoldAfter: 3, ReleaseAfter: 3, Repair: true, RepairAfterS: 1200, RepairCooldownS: 3600}
 	md, err := toml.DecodeFile(path, &c)
 	if err != nil {
 		return nil, err
@@ -82,6 +94,17 @@ func (c *Config) validate() error {
 	}
 	if r := c.UI.RefreshMs; r < 500 || r > 10000 {
 		return fmt.Errorf("ui.refresh_ms must be within 500..10000, got %d", r)
+	}
+	g := c.Guard
+	switch {
+	case g.IntervalS < 10 || g.IntervalS > 600:
+		return fmt.Errorf("guard.interval_s must be within 10..600, got %d", g.IntervalS)
+	case g.HoldAfter < 1 || g.HoldAfter > 20, g.ReleaseAfter < 1 || g.ReleaseAfter > 20:
+		return errors.New("guard.hold_after and guard.release_after must be within 1..20")
+	case g.RepairAfterS < 300 || g.RepairAfterS > 86400:
+		return fmt.Errorf("guard.repair_after_s must be within 300..86400, got %d", g.RepairAfterS)
+	case g.RepairCooldownS < g.RepairAfterS || g.RepairCooldownS > 7*86400:
+		return errors.New("guard.repair_cooldown_s must be within repair_after_s..604800")
 	}
 	return nil
 }

@@ -224,3 +224,34 @@ func hasSourceCode(s *Snapshot, code string) bool {
 func replaceOnce(s, old, new string) string     { return replaceN(s, old, new, 1) }
 func replaceAll(s, old, new string) string      { return replaceN(s, old, new, -1) }
 func replaceN(s, old, new string, n int) string { return strings.Replace(s, old, new, n) }
+
+func TestGuardHold(t *testing.T) {
+	st := newStand(t)
+	st.linked()
+	st.c.Cfg.P2Pool.DataAPIDir = st.dir
+	show := replaceOnce(showActive, "ActiveState=active\nSubState=running\nUnitFileState=enabled\nResult=success\nMainPID=200", "ActiveState=inactive\nSubState=dead\nUnitFileState=enabled\nResult=success\nMainPID=0")
+	st.c.Run = func(context.Context, string, ...string) ([]byte, []byte, error) {
+		return []byte(replaceAll(show, "RuntimeDirectory=moneroid-p2pool-api", "RuntimeDirectory="+runtimeName(st.dir))), nil, nil
+	}
+	st.write(t, p2pool.FileP2P, []byte(`{"connections":3,"uptime":300,"zmq_last_active":1,"peers":["O,1,1,P2Pool v4.18,14795201,1.2.3.4:37888"]}`), st.now)
+	st.write(t, p2pool.FilePool, []byte(`{"pool_statistics":{"hashRate":10000,"sidechainHeight":12,"sidechainDifficulty":100000}}`), st.now)
+	held := filepath.Join(t.TempDir(), "held")
+	if err := os.WriteFile(held, []byte("reason=SIDECHAIN_BEHIND since=2026-11-05T20:00:00Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st.c.HeldFile = held
+	s := st.c.Collect(context.Background())
+	if s.Health.Level != LevelDegraded || !s.HasIssue("GUARD_HOLD") || s.HasIssue("UNIT_NOT_ACTIVE") || !s.HasIssue("SIDECHAIN_BEHIND") {
+		t.Fatalf("level %s issues %+v", s.Health.Level, s.Health.Issues)
+	}
+	if s.Guard == nil || s.Guard.Reason != "SIDECHAIN_BEHIND" || s.Guard.Since == nil {
+		t.Fatalf("guard %+v", s.Guard)
+	}
+	if len(s.P2Pool.PeerHeights) != 1 || *s.P2Pool.PeerMaxHeight != 14795201 {
+		t.Fatalf("peer heights %v", s.P2Pool.PeerHeights)
+	}
+	os.Remove(held)
+	if s := st.c.Collect(context.Background()); s.Guard != nil || !s.HasIssue("UNIT_NOT_ACTIVE") {
+		t.Fatalf("without marker: guard %+v issues %+v", s.Guard, s.Health.Issues)
+	}
+}
