@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,4 +71,20 @@ func TestFailures(t *testing.T) {
 	if !rep.HasFail() {
 		t.Fatal("expected failures")
 	}
+}
+
+func TestGuardHoldIsNotAFault(t *testing.T) {
+	cfg, s := snapshot(t)
+	s.Services.XMRig.ActiveState = "inactive"
+	s.Guard = &status.GuardState{Held: true, Reason: "SIDECHAIN_BEHIND"}
+	rep := Run(context.Background(), cfg, s, run)
+	for _, c := range rep.Checks {
+		if c.Code == "UNIT_ACTIVE" && c.Component == "xmrig" {
+			if !strings.Contains(c.Message, "GUARD_HOLD") || c.Result != Warn {
+				t.Fatalf("check %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatal("no UNIT_ACTIVE check for xmrig")
 }

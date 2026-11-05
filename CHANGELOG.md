@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 — 2026-11-05
 
+- `moneroid guard` + `moneroid-guard.service` (spec §7.1): holds XMRig while P2Pool is not ready (behind its peers, no peers, silent node, stale or untrusted Data API) with 3/3 hysteresis, and repairs an isolated sidechain by moving `p2pool.cache`/`p2pool_peers.txt` aside — at most once per incident and once per hour. Tunable in an optional `[guard]` section.
+- `status`/`tui`/`doctor`: `GUARD_HOLD` replaces `UNIT_NOT_ACTIVE` while the guard holds XMRig, and the P2Pool issues behind the hold stay visible; JSON field `guard`.
+- `moneroid start|stop|restart` and the TUI cancel the guard's hold when they act on XMRig.
+- `install.sh` installs the guard unit, enables/starts it with `--enable`, restarts it on upgrade and stops it first on `--uninstall`.
 - The whole repository is in English (docs, examples, comments); the obsolete stand scripts are replaced by `install.sh` / `install.sh --uninstall`.
 
 ## v0.4.3 — 2026-09-17

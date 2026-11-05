@@ -108,7 +108,12 @@ func (r *runner) systemdChecks() {
 		case "failed":
 			r.add("UNIT_ACTIVE", comp, Fail, fmt.Sprintf("%s is failed: result=%s exit=%s restarts=%s", sv.Unit, sv.Result, i64(sv.LastExitStatus), i64(sv.RestartCount)), "moneroid logs "+comp+"; fix the native config or node, then moneroid start "+comp)
 		default:
-			r.add("UNIT_ACTIVE", comp, Warn, sv.Unit+" is "+sv.ActiveState, "moneroid start "+comp)
+			if comp == "xmrig" && s.Guard != nil {
+				// GUARD-05: a deliberate hold, not a fault; the P2Pool checks below say why.
+				r.add("UNIT_ACTIVE", comp, Warn, fmt.Sprintf("%s is held by moneroid guard (GUARD_HOLD, reason %s)", sv.Unit, s.Guard.Reason), "wait: the guard starts it when P2Pool is ready; `moneroid start xmrig` cancels the hold")
+			} else {
+				r.add("UNIT_ACTIVE", comp, Warn, sv.Unit+" is "+sv.ActiveState, "moneroid start "+comp)
+			}
 		}
 		if comp == "xmrig" {
 			if systemd.Props(props).HasDependency("After", pair[comp]) {

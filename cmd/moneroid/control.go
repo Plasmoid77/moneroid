@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Plasmoid77/moneroid/internal/config"
+	"github.com/Plasmoid77/moneroid/internal/guard"
 	"github.com/Plasmoid77/moneroid/internal/systemd"
 )
 
@@ -51,6 +52,14 @@ func cmdControl(cfgPath, verb string, args []string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return exitUsage
+	}
+	cleared, done, herr := guard.Manual(units, cfg.Services.XMRig)
+	defer done()
+	if cleared {
+		fmt.Println("guard hold cleared: the guard will not start XMRig on its own")
+	}
+	if herr != nil {
+		fmt.Fprintf(os.Stderr, "warning: guard hold: %v; run through sudo\n", herr)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

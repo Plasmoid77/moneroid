@@ -40,6 +40,6 @@ socks5 = 127.0.0.1:1080
 socks5-proxy-type = plain
 ```
 
-The proxy source is any host with clean internet, e.g. `ssh -N -D 127.0.0.1:1080 user@host` (restrict the key on that side with `restrict,port-forwarding`), or a VPN client on the host itself. With `socks5` set, `moneroid node list/select` and `doctor` probe the nodes through the same proxy (loopback/LAN addresses go direct, as in P2Pool). After the network is fixed, delete the cache of the isolated chain: `moneroid stop p2pool; rm /var/lib/moneroid/p2pool/p2pool.cache; moneroid start p2pool`.
+The proxy source is any host with clean internet, e.g. `ssh -N -D 127.0.0.1:1080 user@host` (restrict the key on that side with `restrict,port-forwarding`), or a VPN client on the host itself. With `socks5` set, `moneroid node list/select` and `doctor` probe the nodes through the same proxy (loopback/LAN addresses go direct, as in P2Pool). After the network is fixed, delete the cache of the isolated chain: `moneroid stop p2pool; rm /var/lib/moneroid/p2pool/p2pool.cache /var/lib/moneroid/p2pool/p2pool_peers.txt; moneroid start p2pool` — `moneroid-guard.service` does this by itself (spec GUARD-06).
 
 Such uplinks may also filter GitHub release downloads, distribution mirrors and the I2P transports; see `install.md` for the download cache and the i2pd reseed proxy.
