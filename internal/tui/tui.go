@@ -30,6 +30,7 @@ const (
 	historySpan         = 10 * time.Minute
 	payoutsEvery        = time.Minute // journal grep for the dashboard summary
 	priceEvery          = 10 * time.Minute
+	priceRetry          = time.Minute // after a failed request, so a slow start does not hide the rate for 10 minutes
 	nodeEvery           = time.Minute // one get_info to P2Pool's Monero node
 )
 
@@ -125,16 +126,20 @@ func New(cfg *config.Config, c *status.Collector, version string) Model {
 	return m
 }
 
-// priceClient takes P2Pool's socks5 path when one is configured (PRICE-02), as the node probes do.
+// priceClient takes P2Pool's socks5 path when one is configured (PRICE-02), as the node
+// probes do, but with the longer price.Timeout instead of their 3 s.
 func priceClient(cfg *config.Config) *http.Client {
+	var d node.Dialer
 	if cfg.P2Pool.ParamsFile != "" {
 		if b, err := os.ReadFile(cfg.P2Pool.ParamsFile); err == nil {
 			if p := node.ReadParams(b); p.Socks5 != "" {
-				return node.NewHTTPClient(node.SOCKS5Dialer(p.Socks5))
+				d = node.SOCKS5Dialer(p.Socks5)
 			}
 		}
 	}
-	return node.NewHTTPClient(nil)
+	c := node.NewHTTPClient(d)
+	c.Timeout = price.Timeout
+	return c
 }
 
 // Run starts the program; the caller checks for a TTY beforehand.
@@ -144,14 +149,23 @@ func Run(m Model) error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.collect(), m.tick(), (&m).fetchPayouts(), m.payTick(), (&m).fetchPrice(), m.priceTick(), (&m).pingNode(), m.nodeTick())
+	return tea.Batch(m.collect(), m.tick(), (&m).fetchPayouts(), m.payTick(), (&m).fetchPrice(), (&m).pingNode(), m.nodeTick())
 }
 
-func (m Model) priceTick() tea.Cmd {
+// priceTick schedules the next request once the previous one has answered: one chain,
+// priceEvery after a good answer, priceRetry after a failure.
+func (m Model) priceTick(failed bool) tea.Cmd {
 	if m.priceHTTP == nil {
 		return nil
 	}
-	return tea.Tick(priceEvery, func(time.Time) tea.Msg { return priceTickMsg{} })
+	return tea.Tick(priceWait(failed), func(time.Time) tea.Msg { return priceTickMsg{} })
+}
+
+func priceWait(failed bool) time.Duration {
+	if failed {
+		return priceRetry
+	}
+	return priceEvery
 }
 
 // fetchPrice asks for the XMR rate unless it is off or a request is running.
@@ -162,7 +176,7 @@ func (m *Model) fetchPrice() tea.Cmd {
 	m.pricing = true
 	c := m.priceHTTP
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), price.Timeout)
 		defer cancel()
 		q, err := price.Fetch(ctx, c, price.URL, time.Now())
 		return priceMsg{q: q, err: err}
@@ -294,7 +308,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case payTickMsg:
 		return m, tea.Batch(m.fetchPayouts(), m.payTick())
 	case priceTickMsg:
-		return m, tea.Batch(m.fetchPrice(), m.priceTick())
+		return m, m.fetchPrice()
 	case nodeTickMsg:
 		return m, tea.Batch(m.pingNode(), m.nodeTick())
 	case *nodePing:
@@ -313,7 +327,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.quote = msg.q
 		}
-		return m, nil
+		return m, m.priceTick(msg.err != nil)
 	case payoutsMsg:
 		m.paying, m.payErr = false, ""
 		if msg.err != nil {

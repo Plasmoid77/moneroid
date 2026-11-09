@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.7 — 2026-11-10
+
+- TUI: the XMR rate (and with it every USD/EUR amount) could stay "price unavailable" for 10 minutes. The CoinGecko request used the node probes' 3 s timeout, and through a VPN on a mobile uplink CoinGecko often takes 3–5 s; one slow first answer hid the rate until the next request. It now has its own 20 s timeout and is retried after 1 minute when it fails (10 minutes after a good answer, as before). The error reads as one line ("CoinGecko: no answer in time") instead of Go's message with the URL (spec PRICE-01, PRICE-02).
+
 ## v0.5.6 — 2026-11-09
 
 - TUI: pings, as in Gupax (spec UI-08). A `node` line under `P2POOL` pings the Monero node from P2Pool's config every minute (one `get_info`, through P2Pool's `socks5` if set): latency with the median of the last 5 (single slow answers over a VPN are common), sync state, height. A `PEERS` block lists the connected P2Pool peers sorted by ping — address, ping, connection age, direction, software — with min/median/max; it takes only the rows the screen has left, so warnings and issues stay visible.
