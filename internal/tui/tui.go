@@ -176,9 +176,7 @@ func (m *Model) fetchPrice() tea.Cmd {
 	m.pricing = true
 	c := m.priceHTTP
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), price.Timeout)
-		defer cancel()
-		q, err := price.Fetch(ctx, c, price.URL, time.Now())
+		q, err := price.FetchAny(context.Background(), c, price.Providers, time.Now)
 		return priceMsg{q: q, err: err}
 	}
 }

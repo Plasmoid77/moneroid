@@ -16,13 +16,22 @@ func TestFetch(t *testing.T) {
 		body     string
 		usd, eur float64 // 0 = nil
 		fail     bool
+		p        Provider
 	}{
-		"both":       {200, `{"monero":{"usd":599.02,"eur":517.4}}`, 599.02, 517.4, false},
-		"usd only":   {200, `{"monero":{"usd":599.02}}`, 599.02, 0, false},
-		"negative":   {200, `{"monero":{"usd":-1,"eur":0}}`, 0, 0, true},
-		"empty":      {200, `{}`, 0, 0, true},
-		"garbage":    {200, `<html>`, 0, 0, true},
-		"rate-limit": {429, `{}`, 0, 0, true},
+		"both":             {200, `{"monero":{"usd":599.02,"eur":517.4}}`, 599.02, 517.4, false, CoinGecko},
+		"paprika":          {200, `{"id":"xmr-monero","quotes":{"EUR":{"price":528.47,"volume_24h":1.3e8},"USD":{"price":594.3}}}`, 594.3, 528.47, false, CoinPaprika},
+		"paprika eur only": {200, `{"quotes":{"EUR":{"price":528.47}}}`, 0, 528.47, false, CoinPaprika},
+		"gecko fresh":      {200, `{"monero":{"usd":599.02,"eur":517.4,"last_updated_at":1794188800}}`, 599.02, 517.4, false, CoinGecko},
+		"gecko stale":      {200, `{"monero":{"usd":599.02,"eur":517.4,"last_updated_at":1794180000}}`, 0, 0, true, CoinGecko},
+		"paprika fresh":    {200, `{"last_updated":"2026-11-09T01:30:00Z","quotes":{"USD":{"price":594.3}}}`, 594.3, 0, false, CoinPaprika},
+		"paprika stale":    {200, `{"last_updated":"2026-11-08T22:00:00Z","quotes":{"USD":{"price":594.3}}}`, 0, 0, true, CoinPaprika},
+		"paprika bad time": {200, `{"last_updated":"yesterday","quotes":{"USD":{"price":594.3}}}`, 0, 0, true, CoinPaprika},
+		"paprika empty":    {200, `{"error":"id not found"}`, 0, 0, true, CoinPaprika},
+		"usd only":         {200, `{"monero":{"usd":599.02}}`, 599.02, 0, false, CoinGecko},
+		"negative":         {200, `{"monero":{"usd":-1,"eur":0}}`, 0, 0, true, CoinGecko},
+		"empty":            {200, `{}`, 0, 0, true, CoinGecko},
+		"garbage":          {200, `<html>`, 0, 0, true, CoinGecko},
+		"rate-limit":       {429, `{}`, 0, 0, true, CoinGecko},
 	}
 	for name, c := range cases {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -30,7 +39,9 @@ func TestFetch(t *testing.T) {
 			w.Write([]byte(c.body))
 		}))
 		now := time.Unix(1794188828, 0)
-		q, err := Fetch(context.Background(), srv.Client(), srv.URL, now)
+		p := c.p
+		p.URL = srv.URL
+		q, err := Fetch(context.Background(), srv.Client(), p, now)
 		srv.Close()
 		if c.fail {
 			if err == nil {
@@ -38,7 +49,7 @@ func TestFetch(t *testing.T) {
 			}
 			continue
 		}
-		if err != nil || !eq(q.USD, c.usd) || !eq(q.EUR, c.eur) || !q.At.Equal(now) {
+		if err != nil || !eq(q.USD, c.usd) || !eq(q.EUR, c.eur) || !q.At.Equal(now) || q.Source != p.Name {
 			t.Fatalf("%s: %+v %v", name, q, err)
 		}
 	}
@@ -51,14 +62,39 @@ func TestFetchErrors(t *testing.T) {
 	}))
 	c := srv.Client()
 	c.Timeout = 50 * time.Millisecond
-	_, err := Fetch(context.Background(), c, srv.URL, time.Now())
+	slow := CoinGecko
+	slow.URL = srv.URL
+	_, err := Fetch(context.Background(), c, slow, time.Now())
 	srv.Close()
 	if err == nil || err.Error() != "CoinGecko: no answer in time" {
 		t.Fatalf("slow: %v", err)
 	}
-	_, err = Fetch(context.Background(), &http.Client{}, srv.URL, time.Now()) // closed: refused
+	_, err = Fetch(context.Background(), &http.Client{}, slow, time.Now()) // closed: refused
 	if err == nil || strings.Contains(err.Error(), srv.URL) || !strings.HasPrefix(err.Error(), "CoinGecko: ") {
 		t.Fatalf("refused: %v", err)
+	}
+}
+
+// The fallback answers when the first provider fails; with both down, both reasons show.
+func TestFetchAny(t *testing.T) {
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(429) }))
+	defer down.Close()
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"quotes":{"USD":{"price":594.3},"EUR":{"price":528.47}}}`))
+	}))
+	defer up.Close()
+	g, p := CoinGecko, CoinPaprika
+	g.URL, p.URL = down.URL, up.URL
+	q, err := FetchAny(context.Background(), &http.Client{}, []Provider{g, p}, time.Now)
+	if err != nil || q.Source != "CoinPaprika" || *q.USD != 594.3 {
+		t.Fatalf("fallback: %+v %v", q, err)
+	}
+	p.URL = down.URL
+	if _, err := FetchAny(context.Background(), &http.Client{}, []Provider{g, p}, time.Now); err == nil || err.Error() != "CoinGecko: HTTP 429; CoinPaprika: HTTP 429" {
+		t.Fatalf("both down: %v", err)
+	}
+	if len(Providers) != 2 || Providers[0].Name != "CoinGecko" || Providers[1].Name != "CoinPaprika" {
+		t.Fatal("CoinGecko first, CoinPaprika as the fallback")
 	}
 }
 

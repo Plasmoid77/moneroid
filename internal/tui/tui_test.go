@@ -143,7 +143,7 @@ func TestRenderDashboardFillsScreen(t *testing.T) {
 	m.record()
 	m.pay = &payouts.Report{Payouts: []payouts.Payout{{At: time.Now(), XMR: "0.000411000000", AtomicUnits: 411000000, Block: 1}}, TotalXMR: "0.000411000000", TotalAtomicUnits: 411000000, BlocksWithout: 12}
 	s.P2Pool.NetworkDifficulty, s.P2Pool.NetworkReward = f(821571146720), n(605805580000)
-	m.priceHTTP, m.quote = &http.Client{}, &price.Quote{USD: f(599.02), EUR: f(517.4), At: time.Now()}
+	m.priceHTTP, m.quote = &http.Client{}, &price.Quote{USD: f(599.02), EUR: f(517.4), Source: "CoinPaprika", At: time.Now()}
 	raw := m.View().Content
 	if !strings.Contains(raw, "\x1b[38;2;255;102;0m") {
 		t.Fatal("dashboard must carry Monero orange")
@@ -153,7 +153,7 @@ func TestRenderDashboardFillsScreen(t *testing.T) {
 		t.Fatalf("dashboard must fill %d rows, got %d", m.height, got)
 	}
 	for _, want := range []string{"moneroid test", "health OK", "14402", "1 payouts", "0.000411000000", "12 pool blocks", "0.175", "12345680", "active/running",
-		"1 XMR = $599.02 · €517.40", "CoinGecko", "≈ $0.25 · €0.21", "0.000915 XMR/day ≈ $0.55 · €0.47", "XMR/month ≈ $16.43 · €14.20"} {
+		"1 XMR = $599.02 · €517.40   CoinPaprika,", "≈ $0.25 · €0.21", "0.000915 XMR/day ≈ $0.55 · €0.47", "XMR/month ≈ $16.43 · €14.20"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("dashboard lacks %q:\n%s", want, v)
 		}
