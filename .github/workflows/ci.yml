@@ -13,3 +13,26 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make check
+  release:
+    # A pushed tag vX.Y.Z publishes dist/ with its CHANGELOG section as the notes.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: publish
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # only vX.Y.Z: install.sh takes the newest release, so a test tag must never become it
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "not a release tag: $TAG"; exit 0; }
+          make dist VERSION="$TAG"
+          awk -v v="## $TAG " 'index($0, v) == 1 { on = 1; next } on && /^## / { exit } on' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "CHANGELOG.md has no section $TAG"; exit 1; }
+          gh release create "$TAG" dist/* --title "$TAG" --notes-file notes.md

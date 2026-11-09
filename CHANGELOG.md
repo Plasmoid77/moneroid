@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## v0.5.1 — 2026-11-09
 
+- `install.sh` installs the newest stable releases of P2Pool, XMRig and Moneroid instead of versions pinned in the script; re-running it updates everything. P2Pool/XMRig are accepted only when their checksum lists carry a valid signature of the authors' keys pinned by fingerprint (public keys in `keys/`, spec INSTALL-06); `--p2pool-version`, `--xmrig-version`, `--moneroid-version` install given versions. gpg is installed if missing. Without an explicit version it never downgrades below the installed binary, refuses revoked/expired signing keys and uses the download cache only when it is root-owned and not writable by others.
+- `install.sh` adds the operator to `systemd-journal` as well (logs, payouts and the TUI payouts line without sudo).
+- Releases are built and published by CI from a pushed tag (`make dist`).
 - `payouts` and the TUI payouts line: a user outside `systemd-journal`/`adm` got "no payouts" instead of an access error, because `journalctl -q` hid the refusal (PAY-03). Now `-q` is gone and the error says to add the user to `systemd-journal`.
 
 ## v0.5.0 — 2026-11-05

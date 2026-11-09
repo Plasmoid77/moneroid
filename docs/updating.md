@@ -5,7 +5,8 @@
 Moneroid does not need to change as long as the interfaces stay the same: `systemctl show`, `GET /2/summary`, the four Data API files.
 
 ```sh
-# verify the checksum/signature of the new release, then:
+# simplest: re-run install.sh — it fetches the newest releases, checks their signatures and restarts the services.
+# by hand: verify the signature/checksum of the new release (docs/install.md §1), then:
 install -o root -g root -m 0755 p2pool /usr/local/bin/p2pool && moneroid restart p2pool
 install -o root -g root -m 0755 xmrig  /usr/local/bin/xmrig  && moneroid restart xmrig
 moneroid doctor
@@ -13,7 +14,7 @@ moneroid doctor
 
 If the binary path changed, edit `ExecStart=` in the unit (drop-in via `systemctl edit`), then `daemon-reload`. If upstream renamed or removed a field, `status` shows `FIELD_INVALID` or `null` for that metric and everything else keeps working.
 
-`install.sh` pins upstream versions and their SHA256; a new release means updating `P2POOL_VERSION`/`P2POOL_SHA256` (from the signed `sha256sums.txt.asc`) and `XMRIG_VERSION`/`XMRIG_SHA256` (from `SHA256SUMS`) in the script.
+`install.sh` pins no versions, only the upstream signing keys (spec INSTALL-06): a new upstream release needs no change here. If upstream changes its signing key, the install stops with "not signed by …"; check the new key from an independent source, then update `keys/` and the fingerprint in `install.sh`. A specific version: `--p2pool-version`, `--xmrig-version`, `--moneroid-version`.
 
 ## Node
 
@@ -25,6 +26,6 @@ If the binary path changed, edit `ExecStart=` in the unit (drop-in via `systemct
 make build && install -o root -g root -m 0755 moneroid /usr/local/bin/moneroid
 ```
 
-or re-run `install.sh` (it re-downloads the pinned release, verifies it and restarts the services). The services do not depend on the Moneroid binary: updating or removing it does not interrupt mining. The `status --json` and `doctor --json` schemas are versioned by `schema_version`; within a version fields are only added.
+or re-run `install.sh` (it downloads the newest release, verifies it and restarts the services). The services do not depend on the Moneroid binary: updating or removing it does not interrupt mining. The `status --json` and `doctor --json` schemas are versioned by `schema_version`; within a version fields are only added.
 
-Releasing: builds are reproducible (`-trimpath -buildvcs=false`), so `VERSION=vX make build`, put the binary's SHA256 and the extras tarball's SHA256 into `install.sh`, commit, tag, and the build at the tag yields the same hash.
+Releasing: add a `## vX.Y.Z — date` section to `CHANGELOG.md`, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`. CI runs `make check`, `make dist VERSION=vX.Y.Z` (binary, extras with `keys/`, `SHA256SUMS`) and publishes the release with that CHANGELOG section; `install.sh` picks it up as the newest release. Builds are reproducible (`-trimpath -buildvcs=false`, fixed tar order/owner/mtime), so `make dist` at the tag with the same Go version as the CI job (see its log) yields the same `SHA256SUMS`.

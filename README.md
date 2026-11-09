@@ -48,7 +48,7 @@ sh install.sh --wallet 4YOUR_PRIMARY_ADDRESS          # + --enable (autostart), 
 
 `--i2p` (together with `--node LAN_IP:RPC:ZMQ` or a `.b32.i2p` node) installs `i2pd`, creates a server tunnel and moves P2Pool's p2p traffic into I2P — see the section in `docs/install.md`.
 
-The script downloads the official P2Pool and XMRig releases and the Moneroid binary, checks them against the SHA256 values pinned in the script (the P2Pool signature was verified when pinning), creates the group and two system users, installs the configs and unit files, picks a Monero node by probing `nodes.txt`, starts the services and shows `doctor`. Running it again overwrites nothing in `/etc/moneroid`. Removal: `sh install.sh --uninstall [--purge]`.
+The script downloads the newest official P2Pool and XMRig releases and the newest Moneroid release, accepts P2Pool/XMRig only if their checksum lists carry a valid signature of the authors' keys pinned in the script (fingerprints; the public keys are in `keys/`), checks Moneroid against its release `SHA256SUMS`, creates the group and two system users, adds you to the groups `moneroid` and `systemd-journal` (status, logs and payouts without sudo; log in again), installs the configs and unit files, picks a Monero node by probing `nodes.txt`, starts the services and shows `doctor`. Running it again overwrites nothing in `/etc/moneroid`. Running it again updates everything to the newest releases; `--p2pool-version v4.18 --xmrig-version 6.26.0 --moneroid-version v0.5.1` installs given versions (rollback, or offline from a pre-filled `/var/cache/moneroid`). Removal: `sh install.sh --uninstall [--purge]`.
 
 Manually, step by step (or from source: `make build`, Go 1.27) — [docs/install.md](docs/install.md).
 
