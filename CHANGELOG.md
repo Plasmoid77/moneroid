@@ -4,6 +4,7 @@
 
 - Linux console: instead of a fixed CP437 list, the TUI and `status` ask the kernel which characters the loaded console font has (`GIO_UNIMAP`) and replace only the missing ones. With console-setup installed (Debian's default Lat15 font) `€`, `—` and `…` show as they are; v0.5.3 also put `▓` into the sparkline, which Lat15 lacks.
 - Durations are written with a space: `3m 05s`, `12h 07m` (TUI, `status`); the TUI uptime column is one cell wider.
+- `install.sh` (found by an independent Codex review): an argument with a newline (`--node`, `--wallet`, versions) passed validation on its first good line and could carry a `sed` command run as root — now each value must match as a whole. A custom `MONEROID_CACHE` is used only if every parent directory is root-owned and closed to others too (a user owning a parent could swap the cache after the check). The `--i2p` node check and the i2pd install now run before any file is replaced; if the script still stops after replacing binaries and units, it reloads systemd and says that the services were not restarted.
 
 ## v0.5.3 — 2026-11-09
 
