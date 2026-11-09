@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/Plasmoid77/moneroid/internal/ansi"
 )
 
 // Provider is one rate source: a public endpoint that gives USD and EUR in one answer.
@@ -80,7 +82,7 @@ var Kraken = Provider{"Kraken", "https://api.kraken.com/0/public/Ticker?pair=XMR
 			return answer{}, err
 		}
 		if len(b.Error) > 0 {
-			return answer{}, errors.New(b.Error[0])
+			return answer{}, errors.New(ansi.Plain(b.Error[0])) // shown on the terminal
 		}
 		last := func(pair string) float64 {
 			if c := b.Result[pair].C; len(c) > 0 {

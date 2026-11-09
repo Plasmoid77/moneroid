@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -17,7 +18,6 @@ import (
 	"github.com/Plasmoid77/moneroid/internal/node"
 	"github.com/Plasmoid77/moneroid/internal/status"
 	"github.com/Plasmoid77/moneroid/internal/systemd"
-	"github.com/Plasmoid77/moneroid/internal/xmrig"
 )
 
 // cmdGuard runs the hold/repair loop of moneroid-guard.service (GUARD-01..08).
@@ -30,10 +30,6 @@ func cmdGuard(cfgPath string, args []string) int {
 	cfg, code := loadConfig(cfgPath)
 	if code != exitOK {
 		return code
-	}
-	token, err := cfg.ReadToken()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: token_file: %v\n", err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -56,14 +52,7 @@ func cmdGuard(cfgPath string, args []string) int {
 		unlock()
 	}
 	m.LastRepair, m.Repaired = e.load()
-	c := &status.Collector{
-		Cfg:       cfg,
-		Run:       systemd.ExecRunner,
-		XMRig:     &xmrig.Client{HTTP: xmrig.NewHTTPClient(status.ReadTimeout), BaseURL: cfg.XMRig.APIURL, Token: token},
-		Now:       time.Now,
-		Monotonic: status.Monotonic,
-		HeldFile:  status.GuardHeldFile,
-	}
+	c := newCollector(cfg)
 	fmt.Printf("guard started: poll %ds, hold after %d, release after %d, repair %v (after %ds, cooldown %ds)\n",
 		g.IntervalS, g.HoldAfter, g.ReleaseAfter, m.Set.Repair, g.RepairAfterS, g.RepairCooldownS)
 
@@ -201,6 +190,9 @@ func (e *executor) release(ctx context.Context) {
 	if !held() {
 		return // the user took over meanwhile
 	}
+	if e.state(ctx, e.cfg.Services.P2Pool) != "active" {
+		return // P2Pool went down after the snapshot; the next polls decide again
+	}
 	x := e.cfg.Services.XMRig
 	if e.control(ctx, "start", x) != nil {
 		return // the marker stays; the next ready polls try again
@@ -215,6 +207,12 @@ func (e *executor) release(ctx context.Context) {
 // P2Pool and confirm it is down, move the cache aside, start P2Pool. The record
 // stays "pending" until P2Pool is confirmed running again (resume retries it).
 func (e *executor) repair(ctx context.Context, now time.Time) {
+	// The decision comes from a snapshot taken before the lock: a user may have
+	// stopped P2Pool meanwhile, and a repair would start it again.
+	if st := e.state(ctx, e.cfg.Services.P2Pool); st != "active" {
+		fmt.Printf("repair skipped: P2Pool is %s now\n", cmp.Or(st, "in an unknown state"))
+		return
+	}
 	fmt.Println("repair: P2Pool stays behind its peers and does not catch up; resetting its sidechain cache")
 	e.at, e.repaired = now, true
 	if err := e.save("pending"); err != nil {

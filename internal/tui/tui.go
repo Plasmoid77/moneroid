@@ -81,7 +81,8 @@ type Model struct {
 	font       ansi.Font // what the terminal draws (the console font on TERM=linux)
 	pay        *payouts.Report
 	payErr     string
-	priceHTTP  *http.Client // nil = price display off (ui.price = false)
+	priceHTTP  *http.Client // nil = price display off (ui.price = false or priceOff)
+	priceOff   string       // why the price is off although ui.price is on
 	pricing    bool         // a price request is in flight
 	quote      *price.Quote // the median of the providers that answered last, kept when none did
 	rates      []rate       // per price.Providers, for the rates line
@@ -94,7 +95,8 @@ type Model struct {
 	priceErr   string
 	version    string
 	host       string
-	quitting   bool // final frame is empty so terminals without an alternate screen end up clean
+	quitting   bool    // final frame is empty so terminals without an alternate screen end up clean
+	start      tea.Cmd // the first requests, built by New so their in-flight flags are kept
 }
 
 type snapshotMsg *status.Snapshot
@@ -133,25 +135,31 @@ func New(cfg *config.Config, c *status.Collector, version string) Model {
 	m := Model{cfg: cfg, collector: c, run: systemd.ExecRunner, version: version, host: host,
 		ascii: !strings.Contains(lang, "UTF-8") && !strings.Contains(lang, "UTF8"), font: ansi.ConsoleFont(os.Stdout.Fd())}
 	if cfg.UI.Price {
-		m.priceHTTP = priceClient(cfg)
+		m.priceHTTP, m.priceOff = priceClient(cfg)
 	}
+	// Init has a value receiver and cannot keep model changes, so the first requests
+	// are started here, where their in-flight flags (collecting, paying, …) stick.
+	m.start = tea.Batch(m.refresh(), m.tick(), m.fetchPayouts(), m.payTick(), m.fetchPrice(), m.pingNode(), m.nodeTick())
 	return m
 }
 
 // priceClient takes P2Pool's socks5 path when one is configured (PRICE-02), as the node
-// probes do, but with the longer price.Timeout instead of their 3 s.
-func priceClient(cfg *config.Config) *http.Client {
+// probes do, but with the longer price.Timeout instead of their 3 s. An unreadable
+// params-file turns the price off: it may name a proxy, and going direct would bypass it.
+func priceClient(cfg *config.Config) (*http.Client, string) {
 	var d node.Dialer
 	if cfg.P2Pool.ParamsFile != "" {
-		if b, err := os.ReadFile(cfg.P2Pool.ParamsFile); err == nil {
-			if p := node.ReadParams(b); p.Socks5 != "" {
-				d = node.SOCKS5Dialer(p.Socks5)
-			}
+		b, err := os.ReadFile(cfg.P2Pool.ParamsFile)
+		if err != nil {
+			return nil, "cannot read p2pool.params_file for its proxy: " + err.Error()
+		}
+		if p := node.ReadParams(b); p.Socks5 != "" {
+			d = node.SOCKS5Dialer(p.Socks5)
 		}
 	}
 	c := node.NewHTTPClient(d)
 	c.Timeout = price.Timeout
-	return c
+	return c, ""
 }
 
 // Run starts the program; the caller checks for a TTY beforehand.
@@ -160,9 +168,7 @@ func Run(m Model) error {
 	return err
 }
 
-func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.collect(), m.tick(), (&m).fetchPayouts(), m.payTick(), (&m).fetchPrice(), (&m).pingNode(), m.nodeTick())
-}
+func (m Model) Init() tea.Cmd { return m.start }
 
 // priceTick schedules the next request once the previous one has answered: one chain,
 // priceEvery after a good answer, priceRetry after a failure.
@@ -299,6 +305,9 @@ func (m Model) control(verb string, units []string) tea.Cmd {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
+		if verb != "stop" {
+			systemd.ResetStartLimit(ctx, run, units...) // CLI-04; a failure shows in the start itself
+		}
 		if err := systemd.Control(ctx, run, verb, units...); err != nil {
 			return opMsg{text: verb + " failed: " + err.Error()}
 		}
@@ -312,11 +321,11 @@ func (m *Model) fetchPayouts() tea.Cmd {
 		return nil
 	}
 	m.paying = true
-	run, unit := m.run, m.cfg.Services.P2Pool
+	unit := m.cfg.Services.P2Pool
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		rep, err := payouts.Fetch(ctx, run, unit, "")
+		rep, err := payouts.Fetch(ctx, unit, "")
 		return payoutsMsg{rep: rep, err: err}
 	}
 }
@@ -337,34 +346,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case tickMsg:
-		if m.collecting {
-			return m, m.tick() // DATA-01: skipped ticks do not queue
-		}
-		m.collecting = true
-		return m, tea.Batch(m.collect(), m.tick())
+		cmd := m.refresh() // nil while a collection runs: DATA-01, skipped ticks do not queue
+		return m, tea.Batch(cmd, m.tick())
 	case snapshotMsg:
 		m.collecting = false
 		m.prev, m.snap = m.snap, (*status.Snapshot)(msg)
 		m.record()
-		return m, (&m).readP2PoolVersion()
+		cmd := m.readP2PoolVersion()
+		return m, cmd
 	case p2poolVerMsg:
 		m.verReading, m.verFor, m.p2poolVer = false, msg.inv, msg.ver
 		return m, nil
 	case opMsg:
 		m.busy = false
 		m.opResult = msg.text
-		return m, m.refresh()
+		cmd := m.refresh()
+		return m, cmd
 	case logsMsg:
 		signal.Reset(os.Interrupt)
-		return m, m.refresh()
+		cmd := m.refresh()
+		return m, cmd
 	case quitMsg:
 		return m, tea.Quit
 	case payTickMsg:
-		return m, tea.Batch(m.fetchPayouts(), m.payTick())
+		cmd := m.fetchPayouts()
+		return m, tea.Batch(cmd, m.payTick())
 	case priceTickMsg:
-		return m, m.fetchPrice()
+		cmd := m.fetchPrice()
+		return m, cmd
 	case nodeTickMsg:
-		return m, tea.Batch(m.pingNode(), m.nodeTick())
+		cmd := m.pingNode()
+		return m, tea.Batch(cmd, m.nodeTick())
 	case *nodePing:
 		m.pinging, m.node = false, msg
 		if l := msg.r.LatencyMs; l != nil && msg.err == "" && msg.r.Error == "" {
@@ -423,9 +435,8 @@ func (m Model) key(k string) (tea.Model, tea.Cmd) {
 	case modeDashboard:
 		switch k {
 		case "r":
-			if !m.collecting {
-				m.collecting = true
-				return m, m.collect()
+			if cmd := m.refresh(); cmd != nil {
+				return m, cmd
 			}
 		case "s":
 			if !m.busy {
@@ -437,7 +448,8 @@ func (m Model) key(k string) (tea.Model, tea.Cmd) {
 			m.mode = modeHelp
 		case "p":
 			m.mode = modePayouts
-			return m, m.fetchPayouts()
+			cmd := m.fetchPayouts()
+			return m, cmd
 		}
 	case modeTarget:
 		switch k {
@@ -484,7 +496,8 @@ func (m Model) key(k string) (tea.Model, tea.Cmd) {
 		m.mode = modeDashboard
 	case modePayouts:
 		if k == "r" {
-			return m, m.fetchPayouts()
+			cmd := m.fetchPayouts()
+			return m, cmd
 		}
 		m.mode = modeDashboard
 	}

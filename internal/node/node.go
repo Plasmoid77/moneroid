@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Plasmoid77/moneroid/internal/ansi"
 	"github.com/Plasmoid77/moneroid/internal/jsonx"
 )
 
@@ -109,7 +110,12 @@ func rpc(ctx context.Context, client *http.Client, addr string, port int, method
 		return nil, 0, errors.New("invalid JSON-RPC response")
 	}
 	if e, ok := o["error"].(map[string]any); ok {
-		return nil, 0, fmt.Errorf("%s: %v", method, e["message"])
+		// The node's own words end up on a terminal: no control characters, bounded length.
+		msg := []rune(ansi.Plain(fmt.Sprint(e["message"])))
+		if len(msg) > 200 {
+			msg = append(msg[:200], '…')
+		}
+		return nil, 0, fmt.Errorf("%s: %s", method, string(msg))
 	}
 	return o, time.Since(start), nil
 }
@@ -239,17 +245,23 @@ func resolve(ctx context.Context, host string) []string {
 	return append(v4, v6...)
 }
 
-// ProbeAll probes candidates in parallel and returns them ranked (NODE-02):
-// usable nodes first by latency, then the rest in input order.
+// probeParallel bounds concurrent probes: a long nodes.txt probed all at once
+// through a VPN or SOCKS proxy gives false timeouts and inflated latencies.
+const probeParallel = 4
+
+// ProbeAll probes candidates, probeParallel at a time, and returns them ranked
+// (NODE-02): usable nodes first by latency, then the rest in input order.
 func ProbeAll(ctx context.Context, client *http.Client, d Dialer, cands []Candidate) []Result {
 	results := make([]Result, len(cands))
 	var wg sync.WaitGroup
+	sem := make(chan struct{}, probeParallel)
 	for i, c := range cands {
 		wg.Add(1)
-		go func(i int, c Candidate) {
-			defer wg.Done()
+		sem <- struct{}{}
+		go func() {
+			defer func() { <-sem; wg.Done() }()
 			results[i] = Probe(ctx, client, d, c)
-		}(i, c)
+		}()
 	}
 	wg.Wait()
 	sort.SliceStable(results, func(a, b int) bool {
@@ -306,8 +318,11 @@ func SOCKS5Dialer(proxy string) Dialer {
 			req = append(append(req, 1), ip.To4()...)
 		} else if ip != nil {
 			req = append(append(req, 4), ip.To16()...)
-		} else {
+		} else if len(host) <= 255 {
 			req = append(append(req, 3, byte(len(host))), host...)
+		} else {
+			conn.Close()
+			return nil, errors.New("socks5: host name longer than 255 bytes")
 		}
 		req = append(req, byte(port>>8), byte(port))
 		if _, err = conn.Write(req); err == nil {
@@ -496,27 +511,40 @@ func WriteAtomic(path string, data []byte) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// Diff lists the lines that Rewrite changes, for --dry-run output.
+// Diff lists the node-key lines that Rewrite removes and adds, for the output of
+// `node select`. Only host/rpc-port/zmq-port lines are ever shown: the params-file
+// also holds the wallet, which must not reach the terminal (SEC-05).
 func Diff(old, new []byte) []string {
+	o, n := nodeLines(old), nodeLines(new)
 	var out []string
-	o := strings.Split(strings.TrimRight(string(old), "\n"), "\n")
-	n := strings.Split(strings.TrimRight(string(new), "\n"), "\n")
-	for i := 0; i < len(o) || i < len(n); i++ {
-		var a, b string
-		if i < len(o) {
-			a = o[i]
+	for _, l := range o {
+		if !contains(n, l) {
+			out = append(out, "- "+l)
 		}
-		if i < len(n) {
-			b = n[i]
-		}
-		if a != b {
-			if a != "" {
-				out = append(out, "- "+a)
-			}
-			if b != "" {
-				out = append(out, "+ "+b)
-			}
+	}
+	for _, l := range n {
+		if !contains(o, l) {
+			out = append(out, "+ "+l)
 		}
 	}
 	return out
+}
+
+func nodeLines(data []byte) []string {
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if k, _, ok := splitKV(line); ok && contains(nodeKeys, k) {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	return out
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }

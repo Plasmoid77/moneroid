@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.6.0 — 2026-11-10
+
+From a full review of the repository together with an independent Codex review.
+
+Security
+- Text from outside — a Monero node's RPC error, a rate provider's error, upstream API strings — loses every control character (C0, DEL and C1) before it reaches a terminal; a node could otherwise put escape sequences into `node list`, `doctor` and the TUI (SEC-07).
+- `node select` printed lines of `p2pool.conf` other than the node keys when it dropped a duplicate `host` line, which could show the wallet; it now shows only `host`/`rpc-port`/`zmq-port` changes.
+- The guard's hold marker is read without following symlinks or blocking: a FIFO planted in the group-writable `/run/moneroid-guard` could hang `status`, the TUI and the guard.
+- An unreadable `p2pool.conf` no longer makes `node list/select` and the TUI rate requests go direct: they may bypass a `socks5` proxy configured there. `node` stops with the error, the TUI turns the rate off and says why.
+- The polkit rule no longer lets the service accounts `moneroid-p2pool`/`moneroid-xmrig` (members of group `moneroid` for their files) start or stop the units.
+- The P2Pool and XMRig units get the sandbox options that cost a miner nothing (no capabilities, `PrivateDevices`, `Protect*`, `Restrict*`, `LockPersonality`, native syscalls; `systemd-analyze security` 8.3 → 3.1); the guard unit gets the same extras (SEC-08).
+- `install.sh`: a signature check also fails on any `BADSIG`/`ERRSIG` in gpg's status, and the downgrade protection now reads the installed Moneroid version (`moneroid version`; `--version` returned nothing, so it never applied to Moneroid).
+- CI: actions pinned to commit SHAs, read-only token except for the release job, no persisted git credentials, `shellcheck` on `install.sh`.
+
+Fixes
+- Guard: a repair or release decided from a snapshot is re-checked under the lock — a P2Pool the user stopped meanwhile is no longer started again. `moneroid start|stop|restart p2pool` now takes the guard lock too.
+- `status`/`--check`: health is `unknown`, not `ok`, when the sidechain height or the peers' heights are not available (H-03).
+- `payouts` and the TUI parse the journal as it streams: past 1 MiB of matching lines the command failed with a short-write error.
+- TUI: Start/Restart resets a unit stuck in `start-limit-hit` first, like the CLI (CLI-04); the first requests keep their in-flight flags, so a slow first collection or journal read is not started twice.
+- `install.sh` re-run: only files whose content differs are replaced, and only the running services whose binary, unit or `p2pool.conf` changed are restarted (`systemctl try-restart`). A Moneroid-only update no longer costs a P2Pool resync; an XMRig held by the guard or stopped by you stays stopped.
+- `node list/select` probe at most 4 nodes at a time; a long list through a VPN gave false timeouts.
+
 ## v0.5.10 — 2026-11-10
 
 - TUI: the rate sources on the `rates` line are divided by an orange `│` (`|` on a console font without it).

@@ -22,6 +22,14 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
 ReadWritePaths=-/var/lib/moneroid/p2pool
 # The hold marker (GUARD-05): readable by the operator group, kept across guard restarts.
 RuntimeDirectory=moneroid-guard

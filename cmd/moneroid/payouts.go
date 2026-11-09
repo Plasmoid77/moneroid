@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Plasmoid77/moneroid/internal/payouts"
-	"github.com/Plasmoid77/moneroid/internal/systemd"
 )
 
 func cmdPayouts(cfgPath string, args []string) int {
@@ -27,7 +26,7 @@ func cmdPayouts(cfgPath string, args []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	rep, err := payouts.Fetch(ctx, systemd.ExecRunner, cfg.Services.P2Pool, *since)
+	rep, err := payouts.Fetch(ctx, cfg.Services.P2Pool, *since)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		if errors.Is(err, payouts.ErrNoAccess) || errors.Is(err, os.ErrPermission) {

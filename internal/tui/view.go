@@ -212,6 +212,8 @@ func (m Model) payoutsLine() string {
 func (m Model) priceLine() string {
 	q := m.quote
 	switch {
+	case m.priceHTTP == nil && m.priceOff != "":
+		return "1 XMR = ?   price off: " + m.priceOff
 	case m.priceHTTP == nil:
 		return "1 XMR = ?   price display off (ui.price = false)"
 	case q == nil && m.priceErr != "":

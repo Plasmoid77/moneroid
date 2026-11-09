@@ -3,7 +3,9 @@
 // Install to /etc/polkit-1/rules.d/50-moneroid.rules (polkit >= 0.106).
 polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
-        subject.isInGroup("moneroid")) {
+        subject.isInGroup("moneroid") &&
+        // the service accounts carry the group for their files, not to control units
+        subject.user != "moneroid-p2pool" && subject.user != "moneroid-xmrig") {
         var unit = action.lookup("unit");
         var verb = action.lookup("verb");
         if ((unit == "moneroid-p2pool.service" || unit == "moneroid-xmrig.service") &&

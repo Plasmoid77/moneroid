@@ -147,10 +147,11 @@ sum_of() { # file-name list: "HASH  NAME" / "HASH *NAME" lines (sha256sum) or "N
 signed() { # primary-key-fingerprint gpg-arguments…: a good signature by exactly that key
 	k=$1; shift
 	gpg --batch --no-tty --quiet --status-file gpg.status "$@" 2>/dev/null && grep -Eq "^\[GNUPG:\] VALIDSIG .* $k\$" gpg.status &&
-		! grep -Eq '^\[GNUPG:\] (REVKEYSIG|KEYREVOKED|EXPKEYSIG|KEYEXPIRED)' gpg.status
+		! grep -Eq '^\[GNUPG:\] (BADSIG|ERRSIG|REVKEYSIG|KEYREVOKED|EXPKEYSIG|KEYEXPIRED)' gpg.status
 }
 installed() { # binary → its installed version (v1.2.3), empty if none
-	[ -x "/usr/local/bin/$1" ] && "/usr/local/bin/$1" --version 2>/dev/null | head -1 | grep -Eo 'v?[0-9]+(\.[0-9]+){1,3}' | head -1 | sed 's/^v*/v/' || true
+	o=--version; [ "$1" != moneroid ] || o=version
+	[ -x "/usr/local/bin/$1" ] && "/usr/local/bin/$1" $o 2>/dev/null | head -1 | grep -Eo 'v?[0-9]+(\.[0-9]+){1,3}' | head -1 | sed 's/^v*/v/' || true
 }
 older() { # a b: version a is lower than b
 	[ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
@@ -238,12 +239,21 @@ groupadd -r moneroid 2>/dev/null || true
 useradd -r -g moneroid -s "$NOLOGIN" -d /var/lib/moneroid/p2pool -M moneroid-p2pool 2>/dev/null || true
 useradd -r -g moneroid -s "$NOLOGIN" -d /var/lib/moneroid/xmrig -M moneroid-xmrig 2>/dev/null || true
 
+# RESTART: the running services whose binary, unit or config is new. Only they are restarted
+# at the end, so a Moneroid-only update does not cost a P2Pool sidechain resync.
+RESTART=''
+put() { # file mode target [service]: install only when the content differs
+	cmp -s "$1" "$3" && return 0
+	install -o root -g root -m "$2" "$1" "$3"
+	[ -z "${4:-}" ] || RESTART="$RESTART $4"
+}
 REPLACED=1
-install -o root -g root -m 0755 moneroid /usr/local/bin/moneroid
-install -o root -g root -m 0755 p2pool /usr/local/bin/p2pool
-install -o root -g root -m 0755 xmrig /usr/local/bin/xmrig
+put moneroid 0755 /usr/local/bin/moneroid
+put p2pool 0755 /usr/local/bin/p2pool moneroid-p2pool.service
+put xmrig 0755 /usr/local/bin/xmrig moneroid-xmrig.service
 install -d -o root -g root -m 0755 /etc/moneroid
-install -o root -g root -m 0644 systemd/moneroid-p2pool.service systemd/moneroid-xmrig.service systemd/moneroid-guard.service /etc/systemd/system/
+for u in $UNITS; do put "systemd/$u" 0644 "/etc/systemd/system/$u" "$u"; done
+put systemd/moneroid-guard.service 0644 /etc/systemd/system/moneroid-guard.service
 if [ -d /etc/polkit-1/rules.d ]; then install -o root -g root -m 0644 examples/polkit/50-moneroid.rules /etc/polkit-1/rules.d/
 else echo "note: polkit without rules.d (< 0.106): start/stop need sudo"; fi
 
@@ -261,6 +271,7 @@ if [ ! -e /etc/moneroid/moneroid.toml ]; then
 	sed -e 's|^# params_file|params_file|' -e 's|^# nodes_file|nodes_file|' examples/moneroid.toml > moneroid.toml
 	install -o root -g root -m 0644 moneroid.toml /etc/moneroid/moneroid.toml
 fi
+[ $FRESH = 0 ] && [ -z "$NODE" ] && [ $I2P = 0 ] || RESTART="$RESTART moneroid-p2pool.service" # p2pool.conf (re)written
 if [ -n "$NODE" ]; then
 	sed -i -e "s/^host = .*/host = $NODE_HOST/" -e "s/^rpc-port = .*/rpc-port = $NODE_RPC/" -e "s/^zmq-port = .*/zmq-port = $NODE_ZMQ/" /etc/moneroid/p2pool.conf
 fi
@@ -318,7 +329,13 @@ if [ $FRESH = 1 ] && [ -z "$NODE" ] && [ $I2P = 0 ]; then
 	echo "probing Monero nodes from /etc/moneroid/nodes.txt…"
 	moneroid node select || echo "no usable node found; set host/rpc-port/zmq-port in /etc/moneroid/p2pool.conf and run: moneroid start"
 fi
-if systemctl is-active -q moneroid-p2pool.service moneroid-xmrig.service; then moneroid restart; else moneroid start; fi
+# Nothing running: start both. Otherwise restart only what changed and only if it runs:
+# an XMRig held by the guard or stopped by the user stays stopped (it starts with the new files).
+if ! systemctl is-active -q $UNITS; then moneroid start
+elif [ -n "$RESTART" ]; then
+	# shellcheck disable=SC2086 # a list of unit names
+	systemctl try-restart $RESTART && echo "restarted the running ones of:$RESTART"
+else echo "binaries, units and p2pool.conf unchanged: the running services are left as they are"; fi
 if [ $ENABLE = 1 ]; then systemctl enable -q $UNITS moneroid-guard.service && echo "autostart enabled"; fi
 # The guard keeps XMRig stopped while P2Pool is not synced; an upgrade restarts it, --enable starts it.
 if systemctl is-active -q moneroid-guard.service; then systemctl restart moneroid-guard.service

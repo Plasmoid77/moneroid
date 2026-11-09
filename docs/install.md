@@ -84,7 +84,7 @@ Remote node + I2P: forward its RPC and ZMQ to a local address (for example `ssh 
 install -o root -g root -m 0644 examples/polkit/50-moneroid.rules /etc/polkit-1/rules.d/
 ```
 
-The rule allows group `moneroid` only `start/stop/restart` (and `reset-failed`) of the two units. Other units and other actions still require authentication. Needs polkit ≥ 0.106 (JS rules, directory `/etc/polkit-1/rules.d`): Debian 12+/Arch — yes; Ubuntu 22.04 (polkit 0.105) — no, control goes through `sudo` there.
+The rule allows group `moneroid` only `start/stop/restart` (and `reset-failed`) of the two units, and not the service accounts `moneroid-p2pool`/`moneroid-xmrig`, which are in that group for their files. Other units and other actions still require authentication. Needs polkit ≥ 0.106 (JS rules, directory `/etc/polkit-1/rules.d`): Debian 12+/Arch — yes; Ubuntu 22.04 (polkit 0.105) — no, control goes through `sudo` there.
 
 ## 6. Hugepages and MSR (administrative, optional)
 

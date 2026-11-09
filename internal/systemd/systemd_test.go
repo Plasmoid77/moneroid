@@ -57,3 +57,17 @@ func join(a []string) string {
 	}
 	return s
 }
+
+func TestResetStartLimit(t *testing.T) {
+	var resets []string
+	run := func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
+		if args[0] == "show" {
+			return []byte("Id=a.service\nResult=start-limit-hit\n\nId=b.service\nResult=success\n"), nil, nil
+		}
+		resets = append(resets, args[len(args)-1])
+		return nil, nil, nil
+	}
+	if err := ResetStartLimit(context.Background(), run, "a.service", "b.service"); err != nil || len(resets) != 1 || resets[0] != "a.service" {
+		t.Fatalf("err %v resets %v", err, resets)
+	}
+}

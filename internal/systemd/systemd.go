@@ -30,12 +30,12 @@ type limitedWriter struct {
 	n int
 }
 
+// Write keeps the first n bytes and discards the rest. It always reports the full
+// length: a short write would make os/exec fail the whole command.
 func (l *limitedWriter) Write(p []byte) (int, error) {
-	if len(p) > l.n {
-		p = p[:l.n]
-	}
-	l.n -= len(p)
-	l.w.Write(p)
+	k := min(len(p), l.n)
+	l.w.Write(p[:k])
+	l.n -= k
 	return len(p), nil
 }
 
@@ -113,6 +113,22 @@ func Control(ctx context.Context, run Runner, verb string, units ...string) erro
 		return &ControlError{Verb: verb, Err: err, Stderr: strings.TrimSpace(string(stderr))}
 	}
 	return nil
+}
+
+// ResetStartLimit runs reset-failed for the units stuck in start-limit-hit, which
+// otherwise refuse a plain start (CLI-04). Best effort: unreadable states skip it.
+func ResetStartLimit(ctx context.Context, run Runner, units ...string) error {
+	props, err := Show(ctx, run, units...)
+	if err != nil {
+		return nil
+	}
+	var errs []error
+	for _, u := range units {
+		if props[u]["Result"] == "start-limit-hit" {
+			errs = append(errs, Control(ctx, run, "reset-failed", u))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // ControlError wraps a failed systemctl call.

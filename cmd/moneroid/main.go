@@ -119,6 +119,22 @@ func loadConfig(path string) (*config.Config, int) {
 	return cfg, exitOK
 }
 
+// newCollector builds the snapshot collector shared by status, doctor, tui and guard.
+func newCollector(cfg *config.Config) *status.Collector {
+	token, err := cfg.ReadToken()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: token_file: %v\n", err)
+	}
+	return &status.Collector{
+		Cfg:       cfg,
+		Run:       systemd.ExecRunner,
+		XMRig:     &xmrig.Client{HTTP: xmrig.NewHTTPClient(status.ReadTimeout), BaseURL: cfg.XMRig.APIURL, Token: token},
+		Now:       time.Now,
+		Monotonic: status.Monotonic,
+		HeldFile:  status.GuardHeldFile,
+	}
+}
+
 func cmdStatus(cfgPath string, args []string) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -135,18 +151,7 @@ func cmdStatus(cfgPath string, args []string) int {
 	if code != exitOK {
 		return code
 	}
-	token, err := cfg.ReadToken()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: token_file: %v\n", err)
-	}
-	c := &status.Collector{
-		Cfg:       cfg,
-		Run:       systemd.ExecRunner,
-		XMRig:     &xmrig.Client{HTTP: xmrig.NewHTTPClient(status.ReadTimeout), BaseURL: cfg.XMRig.APIURL, Token: token},
-		Now:       time.Now,
-		Monotonic: status.Monotonic,
-		HeldFile:  status.GuardHeldFile,
-	}
+	c := newCollector(cfg)
 	snap := c.Collect(context.Background())
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
