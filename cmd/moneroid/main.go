@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/colorprofile"
 
+	"github.com/Plasmoid77/moneroid/internal/ansi"
 	"github.com/Plasmoid77/moneroid/internal/config"
 	"github.com/Plasmoid77/moneroid/internal/status"
 	"github.com/Plasmoid77/moneroid/internal/systemd"
@@ -155,7 +156,7 @@ func cmdStatus(cfgPath string, args []string) int {
 			return exitCheck
 		}
 	} else {
-		printStatus(colorprofile.NewWriter(os.Stdout, os.Environ()), snap) // strips colour for pipes and NO_COLOR
+		printStatus(ansi.ConsoleWriter(colorprofile.NewWriter(os.Stdout, os.Environ())), snap) // strips colour for pipes and NO_COLOR
 	}
 	if *check && snap.Health.Level != status.LevelOK {
 		return exitCheck

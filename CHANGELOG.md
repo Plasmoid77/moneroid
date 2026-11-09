@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.3 — 2026-11-09
+
+- TUI and `status` on the Linux console (`TERM=linux`, e.g. the server's own monitor): the kernel's built-in font has only CP437, so `€`, `—`, `…` and the sparkline's `▁▂▃▅▆▇` showed as squares. There they are now written as `EUR`, `-`, `...` and a `░▒▓█` sparkline (spec UI-06).
+
 ## v0.5.2 — 2026-11-09
 
 - TUI: an `EARNINGS` block — the XMR rate in USD and EUR (CoinGecko, every 10 min, through P2Pool's `socks5` if set), payouts with their value at today's rate, and the expected XMR a day/a month for the current hashrate; the payouts screen gets a "≈ at today's rate" column. `[ui] price = false` disables the request (spec UI-07, PRICE-01..03).
