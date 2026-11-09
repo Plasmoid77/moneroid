@@ -3,6 +3,9 @@ package tui
 import (
 	"fmt"
 	"math"
+	"net"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,21 +91,26 @@ func (m Model) render() string {
 		share = fmt.Sprintf("%.3f", *p.Hashrate15m / *p.PoolHashrate * 100)
 	}
 	fmt.Fprintf(&b, "  pool %s   your share ≈ %s %%   %s\n", hs(p.PoolHashrate), ansi.White(share), age(s, status.SrcP2PoolPool))
+	if l := m.nodeLine(); l != "" {
+		fmt.Fprintf(&b, "  %s\n", l)
+	}
 
 	fmt.Fprintf(&b, "\n  %s   %s\n", ansi.Orange("EARNINGS"), m.priceLine())
 	fmt.Fprintf(&b, "  %s   %s\n", ansi.Orange("paid    "), m.payoutsLine())
 	fmt.Fprintf(&b, "  %s   %s\n", ansi.Orange("expected"), m.expectedLine(s))
 
+	// The tail (warnings, issues, dialogs) always shows; the peers table gets the rows left over.
+	var t strings.Builder
 	if m.prev != nil && m.prev.XMRig.Rejected != nil && x.Rejected != nil && *x.Rejected > *m.prev.XMRig.Rejected {
-		b.WriteString("\n  " + ansi.Red("warning: rejected submissions increased since the previous sample") + "\n") // H-04
+		t.WriteString("\n  " + ansi.Red("warning: rejected submissions increased since the previous sample") + "\n") // H-04
 	}
 	issues := 0
 	for _, i := range s.Health.Issues {
 		if i.Severity != "info" {
 			if issues == 0 {
-				b.WriteString("\n")
+				t.WriteString("\n")
 			}
-			fmt.Fprintf(&b, "  %s %-24s %s\n", ansi.Severity(fmt.Sprintf("%-7s", i.Severity)), i.Code, i.Message)
+			fmt.Fprintf(&t, "  %s %-24s %s\n", ansi.Severity(fmt.Sprintf("%-7s", i.Severity)), i.Code, i.Message)
 			issues++
 			if issues == 5 {
 				break
@@ -110,12 +118,97 @@ func (m Model) render() string {
 		}
 	}
 	if m.opResult != "" {
-		fmt.Fprintf(&b, "\n  %s\n", ansi.White(m.opResult))
+		fmt.Fprintf(&t, "\n  %s\n", ansi.White(m.opResult))
 	}
 	if d := m.dialog(); d != "" {
-		b.WriteString("\n" + d)
+		t.WriteString("\n" + d)
 	}
-	return m.fit(b.String(), w)
+	room := len(p.Peers) + 3 // unknown height (tests): every peer
+	if m.height > 0 {
+		room = m.height - 1 - strings.Count(b.String(), "\n") - strings.Count(t.String(), "\n")
+	}
+	b.WriteString(peersBlock(p.Peers, room))
+	return m.fit(b.String()+t.String(), w)
+}
+
+// nodeLine is the ping of the Monero node P2Pool uses (UI-08); "" when P2Pool's config is unknown.
+func (m Model) nodeLine() string {
+	n := m.node
+	switch {
+	case m.cfg.P2Pool.ParamsFile == "":
+		return ""
+	case n == nil:
+		return "node   pinging…"
+	case n.err != "":
+		return "node   " + ansi.Red(n.err)
+	}
+	addr := net.JoinHostPort(n.r.Host, strconv.Itoa(n.r.RPC))
+	checked := "checked " + ago(n.at) + " ago"
+	if n.r.Error != "" || n.r.LatencyMs == nil {
+		return fmt.Sprintf("node   %s   %s   %s", addr, ansi.Red("no answer: "+n.r.Error), checked)
+	}
+	sync := "synchronized"
+	if n.r.Synchronized == nil || !*n.r.Synchronized {
+		sync = ansi.Red("not synchronized")
+	}
+	ping := ansi.White(fmt.Sprintf("%d ms", *n.r.LatencyMs))
+	if k := len(m.nodeMs); k > 1 { // one slow answer (it happens over a VPN) next to the usual
+		ms := append([]int64(nil), m.nodeMs...)
+		sort.Slice(ms, func(i, j int) bool { return ms[i] < ms[j] })
+		ping += fmt.Sprintf(" (median %d ms of the last %d)", ms[k/2], k)
+	}
+	return fmt.Sprintf("node   %s   ping %s   %s   height %s   %s", addr, ping, sync, i64(n.r.Height), checked)
+}
+
+// peersBlock lists the connected P2Pool peers by ping in at most room lines (UI-08).
+func peersBlock(peers []status.Peer, room int) string {
+	if len(peers) == 0 || room < 2 {
+		return ""
+	}
+	ps := append([]status.Peer(nil), peers...)
+	sort.SliceStable(ps, func(i, j int) bool {
+		a, b := ps[i].PingMs, ps[j].PingMs
+		if a == nil || b == nil {
+			return a != nil
+		}
+		return *a < *b
+	})
+	var pings []int64
+	width := len("ADDRESS")
+	for _, p := range ps {
+		if p.PingMs != nil {
+			pings = append(pings, *p.PingMs)
+		}
+		width = max(width, len(p.Addr))
+	}
+	title := fmt.Sprintf("%d connected", len(ps))
+	if len(pings) > 0 { // ps is sorted, so pings are too
+		title = fmt.Sprintf("ping min %d · median %d · max %d ms   %s", pings[0], pings[len(pings)/2], pings[len(pings)-1], title)
+	}
+	rows := min(len(ps), room-3)
+	if rows > 0 && rows < len(ps) {
+		title += fmt.Sprintf(", the %d fastest shown", rows)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n  %s   %s\n", ansi.Orange("PEERS"), title)
+	if rows <= 0 {
+		return b.String()
+	}
+	fmt.Fprintf(&b, "    %s\n", ansi.Orange(fmt.Sprintf("%-*s %8s  %-9s %-4s %s", width, "ADDRESS", "PING", "CONNECTED", "DIR", "SOFTWARE")))
+	for _, p := range ps[:rows] {
+		ping, dir, sw := "—", "out", p.Software
+		if p.PingMs != nil {
+			ping = fmt.Sprintf("%d ms", *p.PingMs)
+		}
+		if p.Incoming {
+			dir = "in"
+		}
+		if sw == "" {
+			sw = "—"
+		}
+		fmt.Fprintf(&b, "    %-*s %s  %-9s %-4s %s\n", width, p.Addr, ansi.White(fmt.Sprintf("%8s", ping)), dur(fp(float64(p.UptimeS))), dir, sw)
+	}
+	return b.String()
 }
 
 // fit pads or trims the body so the key bar sits on the last terminal row

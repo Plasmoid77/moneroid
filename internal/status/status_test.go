@@ -250,6 +250,9 @@ func TestGuardHold(t *testing.T) {
 	if len(s.P2Pool.PeerHeights) != 1 || *s.P2Pool.PeerMaxHeight != 14795201 {
 		t.Fatalf("peer heights %v", s.P2Pool.PeerHeights)
 	}
+	if ps := s.P2Pool.Peers; len(ps) != 1 || ps[0].Incoming || ps[0].PingMs == nil || *ps[0].PingMs != 1 || ps[0].Software != "P2Pool v4.18" || ps[0].Addr != "1.2.3.4:37888" || ps[0].Height != 14795201 {
+		t.Fatalf("peers %+v", s.P2Pool.Peers)
+	}
 	os.Remove(held)
 	if s := st.c.Collect(context.Background()); s.Guard != nil || !s.HasIssue("UNIT_NOT_ACTIVE") {
 		t.Fatalf("without marker: guard %+v issues %+v", s.Guard, s.Health.Issues)

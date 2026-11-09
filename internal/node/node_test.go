@@ -65,6 +65,12 @@ func TestProbe(t *testing.T) {
 	if res[1].Usable() || res[2].Error == "" {
 		t.Fatalf("rest %+v %+v", res[1], res[2])
 	}
+	if p := Ping(context.Background(), NewHTTPClient(nil), Candidate{Host: host, RPC: rpc, ZMQ: 1}); p.Error != "" || p.LatencyMs == nil || *p.Height != 1000 || !*p.Synchronized || p.ZMQOpen != nil {
+		t.Fatalf("ping %+v", p)
+	}
+	if p := Ping(context.Background(), NewHTTPClient(nil), Candidate{Host: host, RPC: 1}); p.Error == "" || p.LatencyMs != nil {
+		t.Fatalf("ping of a closed port %+v", p)
+	}
 }
 
 func TestRewrite(t *testing.T) {

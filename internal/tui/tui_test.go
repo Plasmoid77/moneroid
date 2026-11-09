@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Plasmoid77/moneroid/internal/ansi"
 	"github.com/Plasmoid77/moneroid/internal/config"
+	"github.com/Plasmoid77/moneroid/internal/node"
 	"github.com/Plasmoid77/moneroid/internal/payouts"
 	"github.com/Plasmoid77/moneroid/internal/price"
 	"github.com/Plasmoid77/moneroid/internal/status"
@@ -206,3 +208,49 @@ type testErr struct{}
 func (testErr) Error() string { return "boom" }
 
 var errTest = testErr{}
+
+func TestPeersAndNodePing(t *testing.T) {
+	n := func(v int64) *int64 { return &v }
+	b := func(v bool) *bool { return &v }
+	m := model()
+	m.cfg.P2Pool.ParamsFile = "/etc/moneroid/p2pool.conf"
+	s := &status.Snapshot{CollectedAt: time.Now(), Sources: map[string]status.Source{}}
+	s.Health.Level = "ok"
+	s.Health.Issues = []status.Issue{{Severity: "warn", Code: "SOME_ISSUE", Message: "must stay visible"}}
+	for i := 0; i < 12; i++ {
+		s.P2Pool.Peers = append(s.P2Pool.Peers, status.Peer{UptimeS: 125, PingMs: n(int64(300 - i*20)), Software: "P2Pool v4.18.1", Addr: fmt.Sprintf("192.0.2.%d:37888", i)})
+	}
+	s.P2Pool.Peers = append(s.P2Pool.Peers, status.Peer{Incoming: true, Addr: "[2001:db8::1]:37888"})
+	m.snap = s
+	m.node = &nodePing{r: node.Result{Candidate: node.Candidate{Host: "198.51.100.7", RPC: 18089}, LatencyMs: n(166), Synchronized: b(true), Height: n(3500000)}, at: time.Now()}
+	strip := func(v string) string { return regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(v, "") }
+
+	m.width, m.height = 0, 0 // size unknown: every peer
+	v := strip(m.View().Content)
+	for _, want := range []string{"node   198.51.100.7:18089   ping 166 ms   synchronized   height 3500000", "PEERS", "ping min 80 · median 200 · max 300 ms   13 connected", "192.0.2.11:37888       80 ms  2m 05s    out  P2Pool v4.18.1", "[2001:db8::1]:37888        —", "SOME_ISSUE"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("lacks %q:\n%s", want, v)
+		}
+	}
+	if strings.Index(v, "192.0.2.11:") > strings.Index(v, "192.0.2.0:") || strings.Index(v, "192.0.2.0:") > strings.Index(v, "[2001:db8::1]") {
+		t.Fatalf("peers must be sorted by ping, unmeasured last:\n%s", v)
+	}
+
+	m.width, m.height = 120, 34 // a few rows to spare: the fastest peers, the issues untouched
+	v = strip(m.View().Content)
+	if !strings.Contains(v, "fastest shown") || !strings.Contains(v, "192.0.2.11:") || strings.Contains(v, "[2001:db8::1]") || !strings.Contains(v, "SOME_ISSUE") || len(strings.Split(v, "\n")) != 34 {
+		t.Fatalf("height 34:\n%s", v)
+	}
+
+	for _, ms := range []int64{180, 175, 2192} {
+		mm, _ := m.Update(&nodePing{r: node.Result{Candidate: node.Candidate{Host: "198.51.100.7", RPC: 18089}, LatencyMs: n(ms), Synchronized: b(true)}, at: time.Now()})
+		m = mm.(Model)
+	}
+	if v = strip(m.View().Content); !strings.Contains(v, "ping 2192 ms (median 180 ms of the last 3)") {
+		t.Fatalf("node median:\n%s", v)
+	}
+	m.node = &nodePing{r: node.Result{Candidate: node.Candidate{Host: "198.51.100.7", RPC: 18089}, Error: "connection refused"}, at: time.Now()}
+	if v = strip(m.View().Content); !strings.Contains(v, "no answer: connection refused") {
+		t.Fatalf("node error:\n%s", v)
+	}
+}
