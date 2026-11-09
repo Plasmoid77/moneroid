@@ -303,8 +303,9 @@ if [ $I2P = 1 ]; then
 		sleep 2
 	done
 	[ -n "$b32" ] || die "i2pd did not report the moneroid-p2pool tunnel (web console $console); check journalctl -u i2pd"
-	sed -i '/^socks5 = \|^socks5-proxy-type = \|^no-dns = \|^i2p-address = \|^p2p = \|^no-clearnet-p2p = /d' /etc/moneroid/p2pool.conf
-	printf '\n# P2Pool over I2P (install.sh --i2p): peers via i2pd SOCKS, node on LAN/localhost is reached directly.\nsocks5 = %s\nsocks5-proxy-type = i2p\nno-dns = 1\ni2p-address = %s\np2p = 127.0.0.1:%s\nno-clearnet-p2p = 1\n' "$socks" "$b32" "$p2p_port" >> /etc/moneroid/p2pool.conf
+	# Same block every run (comment included), so a repeated --i2p leaves p2pool.conf byte-identical.
+	sed -i '/^# P2Pool over I2P (install.sh --i2p)/d; /^socks5 = \|^socks5-proxy-type = \|^no-dns = \|^i2p-address = \|^p2p = \|^no-clearnet-p2p = /d' /etc/moneroid/p2pool.conf
+	printf '# P2Pool over I2P (install.sh --i2p): peers via i2pd SOCKS, node on LAN/localhost is reached directly.\nsocks5 = %s\nsocks5-proxy-type = i2p\nno-dns = 1\ni2p-address = %s\np2p = 127.0.0.1:%s\nno-clearnet-p2p = 1\n' "$socks" "$b32" "$p2p_port" >> /etc/moneroid/p2pool.conf
 	echo "I2P: p2p tunnel $b32:$p2p_port, keys in /var/lib/i2pd/moneroid-p2pool.dat (back it up)"
 fi
 
