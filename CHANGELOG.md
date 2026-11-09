@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.8 — 2026-11-10
+
+- TUI: a second source for the XMR rate. When CoinGecko fails (timeout, `HTTP 429` — common behind a shared VPN exit), CoinPaprika is asked; it is one of the two providers of the official Monero GUI wallet and not an exchange. A rate that its provider last updated more than an hour ago is refused (found by an independent Codex review), so a stalled source cannot pass for fresh. The rate line names the source it came from; with both down, both reasons are shown. Each request has a 10 s timeout (spec PRICE-01, PRICE-02).
+
 ## v0.5.7 — 2026-11-10
 
 - TUI: the XMR rate (and with it every USD/EUR amount) could stay "price unavailable" for 10 minutes. The CoinGecko request used the node probes' 3 s timeout, and through a VPN on a mobile uplink CoinGecko often takes 3–5 s; one slow first answer hid the rate until the next request. It now has its own 20 s timeout and is retried after 1 minute when it fails (10 minutes after a good answer, as before). The error reads as one line ("CoinGecko: no answer in time") instead of Go's message with the URL (spec PRICE-01, PRICE-02).

@@ -258,13 +258,13 @@ func (m Model) priceLine() string {
 	case q == nil && m.priceErr != "":
 		return "1 XMR = ?   price unavailable: " + m.priceErr
 	case q == nil:
-		return "1 XMR = …   asking " + price.Source
+		return "1 XMR = …   asking " + price.Providers[0].Name
 	}
 	stale := ""
 	if m.priceErr != "" {
 		stale = "   " + ansi.Red("stale: "+m.priceErr)
 	}
-	return fmt.Sprintf("1 XMR = %s   %s, %s ago%s", m.fiat(1, true), price.Source, ago(q.At), stale)
+	return fmt.Sprintf("1 XMR = %s   %s, %s ago%s", m.fiat(1, true), q.Source, ago(q.At), stale)
 }
 
 // expectedLine is the long-run expectation for the current hashrate: P2Pool pays the
