@@ -120,6 +120,7 @@ type P2PoolMetrics struct {
 	StratumConnections     *int64     `json:"stratum_connections"`
 	NetworkHeight          *int64     `json:"network_height"`
 	NetworkDifficulty      *float64   `json:"network_difficulty"`
+	NetworkReward          *int64     `json:"network_reward_atomic"` // block reward of the current Monero block, atomic units
 	PoolHashrate           *float64   `json:"pool_hashrate_hs"`
 	SidechainHeight        *int64     `json:"sidechain_height"`
 	SidechainDifficulty    *float64   `json:"sidechain_difficulty"`

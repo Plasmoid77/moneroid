@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.2 — 2026-11-09
+
+- TUI: an `EARNINGS` block — the XMR rate in USD and EUR (CoinGecko, every 10 min, through P2Pool's `socks5` if set), payouts with their value at today's rate, and the expected XMR a day/a month for the current hashrate; the payouts screen gets a "≈ at today's rate" column. `[ui] price = false` disables the request (spec UI-07, PRICE-01..03).
+- `status --json`: `p2pool.network_reward_atomic` (the block reward from `network/stats`).
+- The orange is now exactly the Monero logo's `#FF6600` (was `#FF8000`).
+- Go 1.27.3 (go.mod), so CI and local builds use the same toolchain and `make dist` is byte-identical.
+
 ## v0.5.1 — 2026-11-09
 
 - `install.sh` installs the newest stable releases of P2Pool, XMRig and Moneroid instead of versions pinned in the script; re-running it updates everything. P2Pool/XMRig are accepted only when their checksum lists carry a valid signature of the authors' keys pinned by fingerprint (public keys in `keys/`, spec INSTALL-06); `--p2pool-version`, `--xmrig-version`, `--moneroid-version` install given versions. gpg is installed if missing. Without an explicit version it never downgrades below the installed binary, refuses revoked/expired signing keys and uses the download cache only when it is root-owned and not writable by others.

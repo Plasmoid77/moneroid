@@ -5,6 +5,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,7 +16,9 @@ import (
 
 	"github.com/Plasmoid77/moneroid/internal/config"
 	"github.com/Plasmoid77/moneroid/internal/guard"
+	"github.com/Plasmoid77/moneroid/internal/node"
 	"github.com/Plasmoid77/moneroid/internal/payouts"
+	"github.com/Plasmoid77/moneroid/internal/price"
 	"github.com/Plasmoid77/moneroid/internal/status"
 	"github.com/Plasmoid77/moneroid/internal/systemd"
 )
@@ -25,6 +28,7 @@ const (
 	historyLen          = 1200
 	historySpan         = 10 * time.Minute
 	payoutsEvery        = time.Minute // journal grep for the dashboard summary
+	priceEvery          = 10 * time.Minute
 )
 
 type mode int
@@ -71,6 +75,10 @@ type Model struct {
 	ascii      bool
 	pay        *payouts.Report
 	payErr     string
+	priceHTTP  *http.Client // nil = price display off (ui.price = false)
+	pricing    bool         // a price request is in flight
+	quote      *price.Quote // last good quote, kept on errors
+	priceErr   string
 	version    string
 	host       string
 	quitting   bool // final frame is empty so terminals without an alternate screen end up clean
@@ -85,13 +93,34 @@ type payoutsMsg struct {
 	err error
 }
 type payTickMsg struct{}
+type priceMsg struct {
+	q   *price.Quote
+	err error
+}
+type priceTickMsg struct{}
 type quitMsg struct{}
 
 func New(cfg *config.Config, c *status.Collector, version string) Model {
 	lang := strings.ToUpper(os.Getenv("LC_ALL") + os.Getenv("LC_CTYPE") + os.Getenv("LANG"))
 	host, _ := os.Hostname()
-	return Model{cfg: cfg, collector: c, run: systemd.ExecRunner, version: version, host: host,
+	m := Model{cfg: cfg, collector: c, run: systemd.ExecRunner, version: version, host: host,
 		ascii: !strings.Contains(lang, "UTF-8") && !strings.Contains(lang, "UTF8")}
+	if cfg.UI.Price {
+		m.priceHTTP = priceClient(cfg)
+	}
+	return m
+}
+
+// priceClient takes P2Pool's socks5 path when one is configured (PRICE-02), as the node probes do.
+func priceClient(cfg *config.Config) *http.Client {
+	if cfg.P2Pool.ParamsFile != "" {
+		if b, err := os.ReadFile(cfg.P2Pool.ParamsFile); err == nil {
+			if p := node.ReadParams(b); p.Socks5 != "" {
+				return node.NewHTTPClient(node.SOCKS5Dialer(p.Socks5))
+			}
+		}
+	}
+	return node.NewHTTPClient(nil)
 }
 
 // Run starts the program; the caller checks for a TTY beforehand.
@@ -101,7 +130,29 @@ func Run(m Model) error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.collect(), m.tick(), (&m).fetchPayouts(), m.payTick())
+	return tea.Batch(m.collect(), m.tick(), (&m).fetchPayouts(), m.payTick(), (&m).fetchPrice(), m.priceTick())
+}
+
+func (m Model) priceTick() tea.Cmd {
+	if m.priceHTTP == nil {
+		return nil
+	}
+	return tea.Tick(priceEvery, func(time.Time) tea.Msg { return priceTickMsg{} })
+}
+
+// fetchPrice asks for the XMR rate unless it is off or a request is running.
+func (m *Model) fetchPrice() tea.Cmd {
+	if m.priceHTTP == nil || m.pricing {
+		return nil
+	}
+	m.pricing = true
+	c := m.priceHTTP
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		q, err := price.Fetch(ctx, c, price.URL, time.Now())
+		return priceMsg{q: q, err: err}
+	}
 }
 
 func (m Model) tick() tea.Cmd {
@@ -198,6 +249,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case payTickMsg:
 		return m, tea.Batch(m.fetchPayouts(), m.payTick())
+	case priceTickMsg:
+		return m, tea.Batch(m.fetchPrice(), m.priceTick())
+	case priceMsg:
+		m.pricing, m.priceErr = false, ""
+		if msg.err != nil {
+			m.priceErr = msg.err.Error() // keep the last good quote on screen
+		} else {
+			m.quote = msg.q
+		}
+		return m, nil
 	case payoutsMsg:
 		m.paying, m.payErr = false, ""
 		if msg.err != nil {

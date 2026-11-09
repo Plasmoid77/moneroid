@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Plasmoid77/moneroid/internal/ansi"
+	"github.com/Plasmoid77/moneroid/internal/price"
 	"github.com/Plasmoid77/moneroid/internal/status"
 )
 
@@ -84,7 +85,9 @@ func (m Model) render() string {
 	}
 	fmt.Fprintf(&b, "  pool %s   your share ≈ %s %%   %s\n", hs(p.PoolHashrate), ansi.White(share), age(s, status.SrcP2PoolPool))
 
-	fmt.Fprintf(&b, "\n  %s   %s\n", ansi.Orange("PAYOUTS"), m.payoutsLine())
+	fmt.Fprintf(&b, "\n  %s   %s\n", ansi.Orange("EARNINGS"), m.priceLine())
+	fmt.Fprintf(&b, "  %s   %s\n", ansi.Orange("paid    "), m.payoutsLine())
+	fmt.Fprintf(&b, "  %s   %s\n", ansi.Orange("expected"), m.expectedLine(s))
 
 	if m.prev != nil && m.prev.XMRig.Rejected != nil && x.Rejected != nil && *x.Rejected > *m.prev.XMRig.Rejected {
 		b.WriteString("\n  " + ansi.Red("warning: rejected submissions increased since the previous sample") + "\n") // H-04
@@ -144,8 +147,73 @@ func (m Model) payoutsLine() string {
 	if m.payErr != "" {
 		stale = "   " + ansi.Red("stale: "+m.payErr)
 	}
-	return fmt.Sprintf("%s payouts   total %s XMR   last %s +%s   %d pool blocks without a share%s",
-		ansi.White(fmt.Sprint(len(m.pay.Payouts))), ansi.White(m.pay.TotalXMR), at, last.XMR, m.pay.BlocksWithout, stale)
+	return fmt.Sprintf("%s payouts   total %s XMR%s   last %s +%s XMR%s   %d pool blocks without a share%s",
+		ansi.White(fmt.Sprint(len(m.pay.Payouts))), ansi.White(m.pay.TotalXMR), m.approx(float64(m.pay.TotalAtomicUnits)/1e12, true),
+		at, last.XMR, m.approx(float64(last.AtomicUnits)/1e12, false), m.pay.BlocksWithout, stale)
+}
+
+// priceLine is the XMR rate with its source and age (PRICE-01).
+func (m Model) priceLine() string {
+	q := m.quote
+	switch {
+	case m.priceHTTP == nil:
+		return "1 XMR = ?   price display off (ui.price = false)"
+	case q == nil && m.priceErr != "":
+		return "1 XMR = ?   price unavailable: " + m.priceErr
+	case q == nil:
+		return "1 XMR = …   asking " + price.Source
+	}
+	stale := ""
+	if m.priceErr != "" {
+		stale = "   " + ansi.Red("stale: "+m.priceErr)
+	}
+	return fmt.Sprintf("1 XMR = %s   %s, %s ago%s", m.fiat(1, true), price.Source, ago(q.At), stale)
+}
+
+// expectedLine is the long-run expectation for the current hashrate: P2Pool pays the
+// same on average as solo mining, only smoother (PRICE-03).
+func (m Model) expectedLine(s *status.Snapshot) string {
+	h, label := s.XMRig.Hashrate15m, "15m"
+	if h == nil || *h <= 0 {
+		h, label = s.XMRig.Hashrate60s, "60s"
+	}
+	p := s.P2Pool
+	if h == nil || *h <= 0 || p.NetworkDifficulty == nil || p.NetworkReward == nil {
+		return "—   needs the XMRig hashrate and the P2Pool network stats"
+	}
+	day := price.PerDay(*h, *p.NetworkDifficulty, *p.NetworkReward)
+	return fmt.Sprintf("%s XMR/day%s   %s XMR/month%s   at %s (%s), block reward %.4f XMR",
+		ansi.White(fmt.Sprintf("%.6f", day)), m.approx(day, true), fmt.Sprintf("%.5f", day*30), m.approx(day*30, true),
+		hs(h), label, float64(*p.NetworkReward)/1e12)
+}
+
+// fiat formats xmr in the quoted currencies, "$1.49 · €1.29"; "" without a quote.
+func (m Model) fiat(xmr float64, white bool) string {
+	if m.quote == nil {
+		return ""
+	}
+	var parts []string
+	for _, c := range []struct {
+		sym  string
+		rate *float64
+	}{{"$", m.quote.USD}, {"€", m.quote.EUR}} {
+		if c.rate != nil {
+			v := fmt.Sprintf("%s%.2f", c.sym, xmr**c.rate)
+			if white {
+				v = ansi.White(v)
+			}
+			parts = append(parts, v)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// approx is " ≈ $x · €y" or "" without a quote.
+func (m Model) approx(xmr float64, white bool) string {
+	if f := m.fiat(xmr, white); f != "" {
+		return " ≈ " + f
+	}
+	return ""
 }
 
 func pad(s string, w int) string {
@@ -206,15 +274,19 @@ func (m Model) payoutsView() string {
 		if len(rows) > 12 {
 			rows = rows[len(rows)-12:]
 		}
-		fmt.Fprintf(&b, "    %-20s %-16s %s\n", "TIME (local)", "XMR", "BLOCK")
+		now := ""
+		if m.quote != nil {
+			now = "≈ AT TODAY'S RATE"
+		}
+		fmt.Fprintf(&b, "    %-20s %-16s %-9s %s\n", "TIME (local)", "XMR", "BLOCK", now)
 		for _, p := range rows {
 			at := "unknown"
 			if !p.At.IsZero() {
 				at = p.At.Local().Format("2006-01-02 15:04:05")
 			}
-			fmt.Fprintf(&b, "    %-20s %-16s %d\n", at, p.XMR, p.Block)
+			fmt.Fprintf(&b, "    %-20s %-16s %-9d %s\n", at, p.XMR, p.Block, m.fiat(float64(p.AtomicUnits)/1e12, false))
 		}
-		fmt.Fprintf(&b, "    %d payouts, total %s XMR; %d pool blocks without a payout\n", len(m.pay.Payouts), m.pay.TotalXMR, m.pay.BlocksWithout)
+		fmt.Fprintf(&b, "    %d payouts, total %s XMR%s; %d pool blocks without a payout\n", len(m.pay.Payouts), m.pay.TotalXMR, m.approx(float64(m.pay.TotalAtomicUnits)/1e12, false), m.pay.BlocksWithout)
 	}
 	b.WriteString("  (r reload, Esc close)\n")
 	return b.String()

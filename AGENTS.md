@@ -6,7 +6,7 @@ This file is the contract for any change in the repository. Read it in full befo
 
 Moneroid is a thin layer over two foreign programs (P2Pool, XMRig) and systemd. The owner's goal: **write it once and not maintain it**. Hence the main criterion for any change: *can a stock systemd / journalctl / upstream command do this?* If yes, the change is not needed.
 
-Do not add: daemons (the one exception is `moneroid guard`, owner decision 2026-11-05, spec §7.1), databases, a web UI, auto-updates, binary downloads inside the tool, `monerod` management, multiple stacks, wallet balances and external pool observers, log parsing as a metrics source (exception: payout events, `internal/payouts`), forks/vendoring of upstream, new dependencies without a concrete need.
+Do not add: daemons (the one exception is `moneroid guard`, owner decision 2026-11-05, spec §7.1), databases, a web UI, auto-updates, binary downloads inside the tool, `monerod` management, multiple stacks, wallet balances and external pool observers (an exchange rate is not one: the TUI shows the XMR price per spec PRICE-01..03, owner decision 2026-11-09), log parsing as a metrics source (exception: payout events, `internal/payouts`), forks/vendoring of upstream, new dependencies without a concrete need.
 
 ## Where things are
 

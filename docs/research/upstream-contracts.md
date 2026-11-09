@@ -73,7 +73,7 @@ Upstream also emits `peers` as an array of strings `dir,ping,?,version,height,ip
 
 ## 5. The remaining files
 
-`network/stats`: snapshot `network_height ← height`, `network_difficulty ← difficulty`. `timestamp` is the block time, not the API update time; do not use it for file freshness. The reward field in atomic units is not needed by v1.
+`network/stats`: snapshot `network_height ← height`, `network_difficulty ← difficulty`. `timestamp` is the block time, not the API update time; do not use it for file freshness. `network_reward_atomic ← reward` (atomic units, the current block reward; used by the TUI expectation, spec PRICE-03).
 
 `pool/stats`: snapshot `pool_hashrate_hs ← pool_statistics.hashRate`, `sidechain_height ← pool_statistics.sidechainHeight`, `sidechain_difficulty ← pool_statistics.sidechainDifficulty`. `miners` is not an exact count of active miners/local workers; v1 does not show it. The main/mini/nano name is not exported; `sidechain` in the snapshot is null. Both files are updated on events. [p2pool.cpp](https://github.com/SChernykh/p2pool/blob/9b7395b8c97e7705a138dda2f4edef6b91eebe5f/src/p2pool.cpp#L1905)
 

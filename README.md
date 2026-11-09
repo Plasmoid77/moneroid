@@ -17,7 +17,7 @@ Status: v1 is implemented and verified on Arch Linux (systemd 261), Debian 13 (s
 | Command | What it does |
 |---|---|
 | `moneroid status [--json] [--check]` | Service states, XMRig/P2Pool metrics, source freshness, health with reasons. `--check` → exit 1 unless health is `ok` |
-| `moneroid tui` | Live full-screen dashboard in the spirit of `htop`: hashrate with meters and a sparkline, P2Pool, payouts, issues; start/stop/restart menu with confirmation, journal view, payouts screen (`p`) |
+| `moneroid tui` | Live full-screen dashboard in the spirit of `htop`: hashrate with meters and a sparkline, P2Pool, earnings (XMR rate in USD/EUR from CoinGecko, payouts and the expected XMR a day/month in XMR, $ and €; `[ui] price = false` turns the rate off), issues; start/stop/restart menu with confirmation, journal view, payouts screen (`p`) |
 | `moneroid start\|stop\|restart [all\|p2pool\|xmrig]` | Control through systemd; prints the actual state afterwards |
 | `moneroid logs [--follow] [--lines N] [target]` | `journalctl` by exact unit names |
 | `moneroid doctor [--json]` | 31 checks: units, dependencies, permissions, APIs, freshness, node |
