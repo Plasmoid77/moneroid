@@ -157,6 +157,21 @@ func TestRenderDashboardFillsScreen(t *testing.T) {
 	if testing.Verbose() {
 		t.Log("\n" + v)
 	}
+
+	// The Linux console's kernel font has only CP437: no € — … or ▁▂▃▅▆▇ there.
+	m.vt = true
+	for _, md := range []mode{modeDashboard, modePayouts} {
+		m.mode = md
+		v := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(m.View().Content, "")
+		for _, r := range v {
+			if r > 0x7e && !strings.ContainsRune("·≈←↑→↓§█▓▒░▄", r) {
+				t.Fatalf("Linux console: %q is not in the kernel font:\n%s", r, v)
+			}
+		}
+		if !strings.Contains(v, "EUR 517.40") && !strings.Contains(v, "EUR 0.21") {
+			t.Fatalf("Linux console: no EUR amount:\n%s", v)
+		}
+	}
 }
 
 func TestPayoutFetchGuardAndCollectingRows(t *testing.T) {

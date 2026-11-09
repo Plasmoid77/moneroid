@@ -6,7 +6,11 @@
 // which also honour NO_COLOR and non-TTY output.
 package ansi
 
-import "strings"
+import (
+	"io"
+	"os"
+	"strings"
+)
 
 const (
 	reset    = "\x1b[0m"
@@ -80,4 +84,32 @@ func Bar(width int, frac float64, ascii bool) string {
 		full, empty = "#", "."
 	}
 	return Orange(strings.Repeat(full, n)) + Dim(strings.Repeat(empty, width-n))
+}
+
+// LinuxConsole reports the Linux virtual console (TERM=linux), e.g. the TUI on
+// the server's own monitor. Its built-in kernel font holds only the 256 CP437
+// glyphs, so €, —, – and … come out as a square there.
+func LinuxConsole() bool { return os.Getenv("TERM") == "linux" }
+
+var consoleGlyphs = strings.NewReplacer("€", "EUR ", "—", "-", "–", "-", "…", "...")
+
+// ConsoleSafe spells out the glyphs Moneroid prints that the kernel font lacks
+// (the rest it uses, · ≈ ← ↑ → ↓ § █ ▒ ░, are in CP437).
+func ConsoleSafe(s string) string { return consoleGlyphs.Replace(s) }
+
+// ConsoleWriter is w, passed through ConsoleSafe on the Linux console.
+func ConsoleWriter(w io.Writer) io.Writer {
+	if !LinuxConsole() {
+		return w
+	}
+	return consoleWriter{w}
+}
+
+type consoleWriter struct{ w io.Writer }
+
+func (c consoleWriter) Write(p []byte) (int, error) {
+	if _, err := io.WriteString(c.w, ConsoleSafe(string(p))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

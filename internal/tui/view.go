@@ -16,7 +16,11 @@ func (m Model) View() tea.View {
 	if m.quitting {
 		return tea.NewView("") // with the ClearScreen before Quit this leaves a clean screen even without an alternate screen
 	}
-	v := tea.NewView(m.render())
+	body := m.render()
+	if m.vt {
+		body = ansi.ConsoleSafe(body)
+	}
+	v := tea.NewView(body)
 	v.AltScreen = true
 	v.WindowTitle = "moneroid"
 	return v
@@ -328,8 +332,11 @@ func (m Model) sparkline(width int) string {
 		width = 120
 	}
 	ramp := []rune("▁▂▃▄▅▆▇█")
-	if m.ascii {
+	switch {
+	case m.ascii:
 		ramp = []rune(".:-=+*#@")
+	case m.vt: // the kernel font has no ▁▂▃▅▆▇
+		ramp = []rune("░░▒▒▓▓██")
 	}
 	pts := m.history
 	if len(pts) > width {
