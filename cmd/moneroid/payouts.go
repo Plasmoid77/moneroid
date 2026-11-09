@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/Plasmoid77/moneroid/internal/payouts"
@@ -31,7 +30,7 @@ func cmdPayouts(cfgPath string, args []string) int {
 	rep, err := payouts.Fetch(ctx, systemd.ExecRunner, cfg.Services.P2Pool, *since)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		if strings.Contains(strings.ToLower(err.Error()), "not seeing messages") || errors.Is(err, os.ErrPermission) {
+		if errors.Is(err, payouts.ErrNoAccess) || errors.Is(err, os.ErrPermission) {
 			return exitDenied
 		}
 		return exitCheck
