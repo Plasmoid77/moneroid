@@ -227,11 +227,11 @@ NODE-05. A remote node learns the host's IP and the payout address (P2Pool sends
 
 Accepted by the owner on 2026-09-16. The only place where Moneroid reads journal lines: P2Pool reports payouts only in its log, they are events, not metrics; the rule "the journal is not a metrics source" (§3.1) stands.
 
-PAY-01. `payouts` asks journald only for the matching lines of the P2Pool unit: `journalctl -q -o short-iso -u UNIT -g 'got a payout of|didn't get a payout in block' [--since TIME]`. The line format is fixed by the P2Pool 4.18 sources (`src/p2pool.cpp`): `Your wallet <address> got a payout of <integer>.<12 digits> XMR in block <height>`. The amount is parsed as an integer in atomic units.
+PAY-01. `payouts` asks journald only for the matching lines of the P2Pool unit: `journalctl -o short-iso -u UNIT -g 'got a payout of|didn't get a payout in block' [--since TIME]`. The line format is fixed by the P2Pool 4.18 sources (`src/p2pool.cpp`): `Your wallet <address> got a payout of <integer>.<12 digits> XMR in block <height>`. The amount is parsed as an integer in atomic units.
 
 PAY-02. Output (CLI and the dashboard on `p`): time in the system's local zone, XMR amount, block height, total; separately the number of pool blocks found without a share of yours in the PPLNS window. The wallet address never reaches the output or JSON (SEC-07). `--json`: `schema_version=1`, `payouts[]{at, atomic_units, xmr, block}`, `total_atomic_units`, `total_xmr`, `blocks_without_payout`.
 
-PAY-03. No matches is not an error (journalctl returns 1 without stderr). A journal access refusal is code 3. A changed line format in future P2Pool versions yields an empty list, not false amounts; checked at upstream updates (A20). The source of truth about money is the wallet; external observers (`p2pool.observer`) are not used: they link the observer's IP with the payout address.
+PAY-03. No matches is not an error (journalctl returns 1 without stderr). A journal access refusal is code 3: journalctl is run without `-q`, so it reports on stderr that the caller is not seeing system messages, and the TUI shows that error instead of "no payouts". A changed line format in future P2Pool versions yields an empty list, not false amounts; checked at upstream updates (A20). The source of truth about money is the wallet; external observers (`p2pool.observer`) are not used: they link the observer's IP with the payout address.
 
 ## 7. systemd and lifecycle
 

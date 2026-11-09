@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `payouts` and the TUI payouts line: a user outside `systemd-journal`/`adm` got "no payouts" instead of an access error, because `journalctl -q` hid the refusal (PAY-03). Now `-q` is gone and the error says to add the user to `systemd-journal`.
+
 ## v0.5.0 — 2026-11-05
 
 - `moneroid guard` + `moneroid-guard.service` (spec §7.1): holds XMRig while P2Pool is not ready (behind its peers, no peers, silent node, stale or untrusted Data API) with 3/3 hysteresis, and repairs an isolated sidechain by moving `p2pool.cache`/`p2pool_peers.txt` aside — at most once per incident and once per hour. Tunable in an optional `[guard]` section.

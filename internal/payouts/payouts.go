@@ -40,13 +40,20 @@ type Report struct {
 	BlocksWithout    int      `json:"blocks_without_payout"` // pool blocks found while we had no share in the PPLNS window
 }
 
+// ErrNoAccess: the user may not read the system journal, so "no payouts" would be a lie (PAY-03).
+var ErrNoAccess = errors.New("no access to the system journal: add this user to group systemd-journal (or adm) and log in again")
+
 // Fetch asks journald for the matching lines only (-g is evaluated by journald).
+// No -q: without it journalctl reports on stderr that the caller cannot see system messages.
 func Fetch(ctx context.Context, run systemd.Runner, unit, since string) (*Report, error) {
-	args := []string{"--no-pager", "-q", "-o", "short-iso", "-u", unit, "-g", "got a payout of|didn't get a payout in block"}
+	args := []string{"--no-pager", "-o", "short-iso", "-u", unit, "-g", "got a payout of|didn't get a payout in block"}
 	if since != "" {
 		args = append(args, "--since", since)
 	}
 	out, stderr, err := run(ctx, "journalctl", args...)
+	if strings.Contains(string(stderr), "not seeing messages") {
+		return nil, ErrNoAccess
+	}
 	if err != nil {
 		// journalctl exits 1 with nothing on stderr when no entry matches -g.
 		var ee *exec.ExitError
