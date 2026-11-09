@@ -3,12 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
 
-	"github.com/Plasmoid77/moneroid/internal/status"
-	"github.com/Plasmoid77/moneroid/internal/systemd"
 	"github.com/Plasmoid77/moneroid/internal/tui"
-	"github.com/Plasmoid77/moneroid/internal/xmrig"
 )
 
 func cmdTUI(cfgPath string, args []string) int {
@@ -26,18 +22,7 @@ func cmdTUI(cfgPath string, args []string) int {
 	if code != exitOK {
 		return code
 	}
-	token, err := cfg.ReadToken()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: token_file: %v\n", err)
-	}
-	c := &status.Collector{
-		Cfg:       cfg,
-		Run:       systemd.ExecRunner,
-		XMRig:     &xmrig.Client{HTTP: xmrig.NewHTTPClient(status.ReadTimeout), BaseURL: cfg.XMRig.APIURL, Token: token},
-		Now:       time.Now,
-		Monotonic: status.Monotonic,
-		HeldFile:  status.GuardHeldFile,
-	}
+	c := newCollector(cfg)
 	if err := tui.Run(tui.New(cfg, c, version)); err != nil {
 		fmt.Fprintln(os.Stderr, "tui:", err)
 		return exitCheck

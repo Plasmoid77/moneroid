@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"syscall"
 
 	"github.com/Plasmoid77/moneroid/internal/status"
@@ -60,20 +61,17 @@ func WriteFile(path, content string) error {
 // ErrHoldNotCleared means the caller must not perform the XMRig operation.
 var ErrHoldNotCleared = errors.New("the guard hold could not be cleared")
 
-// Manual wraps a user's start/stop/restart (CLI and TUI): under the lock it
-// removes the hold marker when XMRig is among units, so the guard never undoes
-// the user's decision. Call done after the systemctl operation finished.
+// Manual wraps a user's start/stop/restart (CLI and TUI). It takes the lock for
+// any of the units, so a guard repair never acts on a P2Pool state the user is
+// changing, and removes the hold marker when XMRig is among them, so the guard
+// never undoes the user's decision. Call done after the systemctl operation finished.
 func Manual(units []string, xmrigUnit string) (cleared bool, done func(), err error) {
-	touches := false
-	for _, u := range units {
-		touches = touches || u == xmrigUnit
-	}
-	if !touches {
-		return false, func() {}, nil
-	}
 	unlock, lerr := Lock(LockFile, false)
 	if lerr != nil && !errors.Is(lerr, fs.ErrNotExist) {
 		err = lerr // proceed unlocked, but say so
+	}
+	if !slices.Contains(units, xmrigUnit) {
+		return false, unlock, err
 	}
 	rerr := os.Remove(status.GuardHeldFile)
 	switch {

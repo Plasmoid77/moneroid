@@ -6,7 +6,10 @@
 // which also honour NO_COLOR and non-TTY output.
 package ansi
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
 
 const (
 	reset    = "\x1b[0m"
@@ -80,4 +83,16 @@ func Bar(width int, frac float64, ascii bool) string {
 		full, empty = "#", "."
 	}
 	return Orange(strings.Repeat(full, n)) + Dim(strings.Repeat(empty, width-n))
+}
+
+// Plain removes control characters (C0, DEL and C1, which some terminals take as
+// CSI) from text that came from outside, so it cannot move the cursor or start an
+// escape sequence (SEC-07). Invalid UTF-8 becomes U+FFFD.
+func Plain(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }

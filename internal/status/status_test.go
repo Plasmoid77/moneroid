@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -179,6 +180,7 @@ func TestHealthRules(t *testing.T) {
 			st.write(t, p2pool.FileP2P, []byte(`{"connections":3,"uptime":300,"zmq_last_active":1,"peers":["O,1,1,P2Pool v4.18,14795201,1.2.3.4:37888"]}`), st.now)
 			st.write(t, p2pool.FilePool, []byte(`{"pool_statistics":{"hashRate":10000,"sidechainHeight":12,"sidechainDifficulty":100000}}`), st.now)
 		}, LevelDegraded, "SIDECHAIN_BEHIND"},
+		{"sidechain height unknown", func(st *stand) { os.Remove(filepath.Join(st.dir, p2pool.FilePool)) }, LevelUnknown, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -253,5 +255,31 @@ func TestGuardHold(t *testing.T) {
 	os.Remove(held)
 	if s := st.c.Collect(context.Background()); s.Guard != nil || !s.HasIssue("UNIT_NOT_ACTIVE") {
 		t.Fatalf("without marker: guard %+v issues %+v", s.Guard, s.Health.Issues)
+	}
+}
+
+// The marker directory is group-writable: a FIFO or symlink there must not block or redirect the read.
+func TestReadHeldRefusesSpecialFiles(t *testing.T) {
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "fifo")
+	if err := syscall.Mkfifo(fifo, 0o644); err != nil {
+		t.Skip("mkfifo:", err)
+	}
+	done := make(chan *GuardState, 1)
+	go func() { done <- ReadHeld(fifo) }()
+	select {
+	case g := <-done:
+		if g != nil {
+			t.Fatalf("a FIFO is no marker: %+v", g)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReadHeld blocked on a FIFO")
+	}
+	real := filepath.Join(dir, "real")
+	os.WriteFile(real, []byte("reason=X\n"), 0o644)
+	link := filepath.Join(dir, "link")
+	os.Symlink(real, link)
+	if ReadHeld(link) != nil || ReadHeld(real) == nil {
+		t.Fatal("symlinks are refused, regular files read")
 	}
 }

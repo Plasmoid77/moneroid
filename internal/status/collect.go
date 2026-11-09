@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/user"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Plasmoid77/moneroid/internal/ansi"
 	"github.com/Plasmoid77/moneroid/internal/config"
 	"github.com/Plasmoid77/moneroid/internal/jsonx"
 	"github.com/Plasmoid77/moneroid/internal/p2pool"
@@ -432,12 +434,7 @@ func isInvalidJSON(err error) bool {
 
 // sanitize strips terminal control characters and URL userinfo from upstream text (SEC-07, A18).
 func sanitize(s string) string {
-	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return -1
-		}
-		return r
-	}, s)
+	s = ansi.Plain(s)
 	if i := strings.Index(s, "://"); i >= 0 {
 		if at := strings.IndexByte(s[i+3:], '@'); at >= 0 {
 			end := i + 3 + at
@@ -450,8 +447,19 @@ func sanitize(s string) string {
 }
 
 // ReadHeld parses the guard hold marker ("reason=CODE since=RFC3339"); nil when absent.
+// The directory is writable by the operator group, so the name may be a symlink or
+// a FIFO: open without following or blocking, accept a regular file only, read 4 KiB at most.
 func ReadHeld(path string) *GuardState {
-	b, err := os.ReadFile(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() {
+		return nil
+	}
+	b, err := io.ReadAll(io.LimitReader(f, 4097))
 	if err != nil || len(b) > 4096 {
 		return nil
 	}

@@ -4,16 +4,17 @@
 package payouts
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/Plasmoid77/moneroid/internal/systemd"
 )
 
 // P2Pool 4.18, src/p2pool.cpp: "Your wallet <addr> got a payout of <int>.<12 digits> XMR in block <height>".
@@ -43,31 +44,62 @@ type Report struct {
 // ErrNoAccess: the user may not read the system journal, so "no payouts" would be a lie (PAY-03).
 var ErrNoAccess = errors.New("no access to the system journal: add this user to group systemd-journal (or adm) and log in again")
 
-// Fetch asks journald for the matching lines only (-g is evaluated by journald).
+// Fetch asks journald for the matching lines only (-g is evaluated by journald) and
+// parses them as they stream in, so a long journal history has no size limit.
 // No -q: without it journalctl reports on stderr that the caller cannot see system messages.
-func Fetch(ctx context.Context, run systemd.Runner, unit, since string) (*Report, error) {
+func Fetch(ctx context.Context, unit, since string) (*Report, error) {
+	cmd := exec.CommandContext(ctx, "journalctl", journalArgs(unit, since)...)
+	cmd.Env = append(cmd.Environ(), "SYSTEMD_PAGER=", "SYSTEMD_COLORS=0", "LC_ALL=C")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("journalctl: %w", err)
+	}
+	rep, perr := Parse(unit, out)
+	err = cmd.Wait() // before stderr is read: os/exec writes it until Wait returns
+	if rep, err := finish(rep, stderr.String(), err); err != nil || perr == nil {
+		return rep, err
+	}
+	return nil, fmt.Errorf("journalctl output: %w", perr)
+}
+
+func journalArgs(unit, since string) []string {
 	args := []string{"--no-pager", "-o", "short-iso", "-u", unit, "-g", "got a payout of|didn't get a payout in block"}
 	if since != "" {
 		args = append(args, "--since", since)
 	}
-	out, stderr, err := run(ctx, "journalctl", args...)
-	if strings.Contains(string(stderr), "not seeing messages") {
+	return args
+}
+
+// finish classifies journalctl's exit (PAY-03).
+func finish(rep *Report, stderr string, err error) (*Report, error) {
+	msg := strings.TrimSpace(stderr)
+	if strings.Contains(msg, "not seeing messages") {
 		return nil, ErrNoAccess
 	}
 	if err != nil {
 		// journalctl exits 1 with nothing on stderr when no entry matches -g.
 		var ee *exec.ExitError
-		if !(errors.As(err, &ee) && ee.ExitCode() == 1 && len(strings.TrimSpace(string(stderr))) == 0) {
-			return nil, fmt.Errorf("journalctl: %w: %s", err, strings.TrimSpace(string(stderr)))
+		if !(errors.As(err, &ee) && ee.ExitCode() == 1 && msg == "") {
+			return nil, fmt.Errorf("journalctl: %w: %s", err, msg)
 		}
 	}
-	return Parse(unit, string(out)), nil
+	return rep, nil
 }
 
-// Parse extracts payouts from `journalctl -o short-iso` output.
-func Parse(unit, out string) *Report {
+// Parse extracts payouts from `journalctl -o short-iso` output. Lines have no length
+// limit (journald caps them itself); a read error is returned with what was parsed.
+func Parse(unit string, in io.Reader) (*Report, error) {
 	r := &Report{SchemaVersion: 1, Unit: unit, Payouts: []Payout{}}
-	for _, line := range strings.Split(out, "\n") {
+	br := bufio.NewReader(in)
+	var err error
+	for err == nil {
+		var line string
+		line, err = br.ReadString('\n')
 		if m := payoutRe.FindStringSubmatch(line); m != nil {
 			whole, _ := strconv.ParseUint(m[1], 10, 64)
 			frac, _ := strconv.ParseUint(m[2], 10, 64)
@@ -87,7 +119,10 @@ func Parse(unit, out string) *Report {
 		}
 	}
 	r.TotalXMR = FormatXMR(r.TotalAtomicUnits)
-	return r
+	if err == io.EOF {
+		err = nil
+	}
+	return r, err
 }
 
 // FormatXMR prints atomic units as P2Pool does: integer part, 12 decimals.

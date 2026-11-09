@@ -1,9 +1,9 @@
 package payouts
 
 import (
-	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -14,7 +14,10 @@ garbage line
 `
 
 func TestParse(t *testing.T) {
-	r := Parse("p.service", journal)
+	r, err := Parse("p.service", strings.NewReader(journal))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(r.Payouts) != 2 || r.BlocksWithout != 1 {
 		t.Fatalf("%+v", r)
 	}
@@ -27,13 +30,16 @@ func TestParse(t *testing.T) {
 	if FormatXMR(5) != "0.000000000005" {
 		t.Fatal(FormatXMR(5))
 	}
-	if e := Parse("p.service", ""); len(e.Payouts) != 0 || e.TotalXMR != "0.000000000000" {
+	if e, _ := Parse("p.service", strings.NewReader("")); len(e.Payouts) != 0 || e.TotalXMR != "0.000000000000" {
 		t.Fatalf("empty %+v", e)
 	}
 }
 
 // PAY-03: a user outside systemd-journal gets an access error, not "no payouts".
 func TestFetchAccess(t *testing.T) {
+	if args := journalArgs("p.service", ""); slices.Contains(args, "-q") {
+		t.Fatalf("%v: -q would hide the access hint", args)
+	}
 	hint := "Hint: You are currently not seeing messages from other users and the system.\n"
 	for _, c := range []struct {
 		stderr string
@@ -43,16 +49,24 @@ func TestFetchAccess(t *testing.T) {
 		{hint, errors.New("exit status 1"), ErrNoAccess},
 		{hint, nil, ErrNoAccess},
 		{"", nil, nil},
+		{"Failed to open journal", errors.New("exit status 1"), nil},
 	} {
-		run := func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
-			if name != "journalctl" || slices.Contains(args, "-q") {
-				t.Fatalf("%s %v: -q would hide the access hint", name, args)
-			}
-			return []byte("-- No entries --\n"), []byte(c.stderr), c.err
-		}
-		r, err := Fetch(context.Background(), run, "p.service", "")
-		if !errors.Is(err, c.want) || (c.want == nil && len(r.Payouts) != 0) {
+		rep, _ := Parse("p.service", strings.NewReader("-- No entries --\n"))
+		r, err := finish(rep, c.stderr, c.err)
+		switch {
+		case c.want != nil && !errors.Is(err, c.want),
+			c.want == nil && c.err == nil && (err != nil || len(r.Payouts) != 0),
+			c.want == nil && c.err != nil && err == nil:
 			t.Fatalf("stderr %q: %v %+v", c.stderr, err, r)
 		}
+	}
+}
+
+// A long line in the middle does not end the parse: later payouts still count.
+func TestParseLongLine(t *testing.T) {
+	in := strings.Repeat("x", 2<<20) + "\n" + journal
+	r, err := Parse("p.service", strings.NewReader(in))
+	if err != nil || len(r.Payouts) != 2 {
+		t.Fatalf("err %v payouts %d", err, len(r.Payouts))
 	}
 }

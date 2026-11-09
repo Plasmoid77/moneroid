@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -243,8 +244,13 @@ func TestNodePing(t *testing.T) {
 // The rate gets its own timeout (CoinGecko over a VPN on LTE takes 3-5 s), all three
 // sources are shown, the median is used, and a quick retry follows when none answered.
 func TestPriceSources(t *testing.T) {
-	if c := priceClient(&config.Config{}); c.Timeout != price.Timeout || price.Timeout <= node.ProbeTimeout {
+	if c, _ := priceClient(&config.Config{}); c.Timeout != price.Timeout || price.Timeout <= node.ProbeTimeout {
 		t.Fatalf("price client timeout %v, want %v", c.Timeout, price.Timeout)
+	}
+	unreadable := &config.Config{}
+	unreadable.P2Pool.ParamsFile = filepath.Join(t.TempDir(), "missing.conf")
+	if c, why := priceClient(unreadable); c != nil || why == "" {
+		t.Fatal("an unreadable params-file may name a proxy: no direct requests")
 	}
 	if priceWait(true) != priceRetry || priceWait(false) != priceEvery || priceRetry >= priceEvery {
 		t.Fatalf("waits: failed %v, ok %v", priceWait(true), priceWait(false))

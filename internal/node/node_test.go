@@ -96,6 +96,13 @@ func TestRewrite(t *testing.T) {
 	if got := string(Rewrite([]byte(dup), Candidate{Host: "c", RPC: 4, ZMQ: 5})); got != "host = c\nrpc-port = 4\nzmq-port = 5\n" {
 		t.Fatalf("duplicates must be dropped, got %q", got)
 	}
+	// A dropped duplicate shifts the following lines; the wallet must still not be printed.
+	withWallet := "host = a\nhost = b\nwallet = 4secret\nrpc-port = 1\nzmq-port = 2\n"
+	for _, l := range Diff([]byte(withWallet), Rewrite([]byte(withWallet), Candidate{Host: "c", RPC: 1, ZMQ: 2})) {
+		if strings.Contains(l, "wallet") {
+			t.Fatalf("diff shows the wallet: %q", l)
+		}
+	}
 }
 
 func TestWriteAtomic(t *testing.T) {

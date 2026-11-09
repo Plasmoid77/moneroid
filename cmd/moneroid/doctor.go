@@ -6,12 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/Plasmoid77/moneroid/internal/doctor"
-	"github.com/Plasmoid77/moneroid/internal/status"
 	"github.com/Plasmoid77/moneroid/internal/systemd"
-	"github.com/Plasmoid77/moneroid/internal/xmrig"
 )
 
 func cmdDoctor(cfgPath string, args []string) int {
@@ -25,15 +22,7 @@ func cmdDoctor(cfgPath string, args []string) int {
 	if code != exitOK {
 		return code
 	}
-	token, _ := cfg.ReadToken()
-	c := &status.Collector{
-		Cfg:       cfg,
-		Run:       systemd.ExecRunner,
-		XMRig:     &xmrig.Client{HTTP: xmrig.NewHTTPClient(status.ReadTimeout), BaseURL: cfg.XMRig.APIURL, Token: token},
-		Now:       time.Now,
-		Monotonic: status.Monotonic,
-		HeldFile:  status.GuardHeldFile,
-	}
+	c := newCollector(cfg)
 	snap := c.Collect(context.Background())
 	rep := doctor.Run(context.Background(), cfg, snap, systemd.ExecRunner)
 	if *asJSON {

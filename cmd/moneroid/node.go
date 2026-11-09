@@ -57,11 +57,18 @@ func probeList(cfg *config.Config) ([]node.Result, int) {
 		return nil, exitCheck
 	}
 	// Probe the way P2Pool connects: through its socks5 proxy when the params-file sets one.
+	// An unreadable params-file stops here: it may name a proxy that probing directly would bypass.
 	var d node.Dialer = node.DirectDialer
 	if cfg.P2Pool.ParamsFile != "" {
-		if data, err := os.ReadFile(cfg.P2Pool.ParamsFile); err == nil {
-			d = node.ReadParams(data).Dialer()
+		data, err := os.ReadFile(cfg.P2Pool.ParamsFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "p2pool.params_file (needed for its socks5 proxy):", err)
+			if errors.Is(err, fs.ErrPermission) {
+				return nil, exitDenied
+			}
+			return nil, exitUsage
 		}
+		d = node.ReadParams(data).Dialer()
 	}
 	return node.ProbeAll(context.Background(), node.NewHTTPClient(d), d, cands), exitOK
 }
