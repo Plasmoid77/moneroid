@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -252,5 +253,24 @@ func TestPeersAndNodePing(t *testing.T) {
 	m.node = &nodePing{r: node.Result{Candidate: node.Candidate{Host: "198.51.100.7", RPC: 18089}, Error: "connection refused"}, at: time.Now()}
 	if v = strip(m.View().Content); !strings.Contains(v, "no answer: connection refused") {
 		t.Fatalf("node error:\n%s", v)
+	}
+}
+
+// The rate gets its own timeout (CoinGecko over a VPN on LTE takes 3-5 s) and a quick
+// retry after a failure instead of the 10-minute wait.
+func TestPriceTimeoutAndRetry(t *testing.T) {
+	if c := priceClient(&config.Config{}); c.Timeout != price.Timeout || price.Timeout <= node.ProbeTimeout {
+		t.Fatalf("price client timeout %v, want %v", c.Timeout, price.Timeout)
+	}
+	if priceWait(true) != priceRetry || priceWait(false) != priceEvery || priceRetry >= priceEvery {
+		t.Fatalf("waits: failed %v, ok %v", priceWait(true), priceWait(false))
+	}
+	m := Model{priceHTTP: &http.Client{}, pricing: true}
+	r, cmd := m.Update(priceMsg{err: errors.New("CoinGecko: no answer in time")})
+	if mm := r.(Model); mm.pricing || cmd == nil || !strings.Contains(mm.priceLine(), "price unavailable: CoinGecko: no answer in time") {
+		t.Fatalf("after a failure: pricing %v, next %v, line %q", mm.pricing, cmd != nil, mm.priceLine())
+	}
+	if _, cmd := (Model{}).Update(priceMsg{err: errors.New("x")}); cmd != nil {
+		t.Fatal("price off must not schedule requests")
 	}
 }

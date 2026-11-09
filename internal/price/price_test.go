@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -40,6 +41,24 @@ func TestFetch(t *testing.T) {
 		if err != nil || !eq(q.USD, c.usd) || !eq(q.EUR, c.eur) || !q.At.Equal(now) {
 			t.Fatalf("%s: %+v %v", name, q, err)
 		}
+	}
+}
+
+// A slow or refused answer reads as one short line, without Go's URL dump.
+func TestFetchErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	c := srv.Client()
+	c.Timeout = 50 * time.Millisecond
+	_, err := Fetch(context.Background(), c, srv.URL, time.Now())
+	srv.Close()
+	if err == nil || err.Error() != "CoinGecko: no answer in time" {
+		t.Fatalf("slow: %v", err)
+	}
+	_, err = Fetch(context.Background(), &http.Client{}, srv.URL, time.Now()) // closed: refused
+	if err == nil || strings.Contains(err.Error(), srv.URL) || !strings.HasPrefix(err.Error(), "CoinGecko: ") {
+		t.Fatalf("refused: %v", err)
 	}
 }
 
