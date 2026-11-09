@@ -30,6 +30,7 @@ const (
 	historySpan         = 10 * time.Minute
 	payoutsEvery        = time.Minute // journal grep for the dashboard summary
 	priceEvery          = 10 * time.Minute
+	nodeEvery           = time.Minute // one get_info to P2Pool's Monero node
 )
 
 type mode int
@@ -80,6 +81,9 @@ type Model struct {
 	priceHTTP  *http.Client // nil = price display off (ui.price = false)
 	pricing    bool         // a price request is in flight
 	quote      *price.Quote // last good quote, kept on errors
+	pinging    bool         // a node ping is in flight
+	node       *nodePing    // last node ping
+	nodeMs     []int64      // the last pings that answered (at most 5), for the median
 	priceErr   string
 	version    string
 	host       string
@@ -100,6 +104,14 @@ type priceMsg struct {
 	err error
 }
 type priceTickMsg struct{}
+
+// nodePing is the TUI's ping of the Monero node in P2Pool's config (UI-08).
+type nodePing struct {
+	r   node.Result
+	err string // the config could not be read
+	at  time.Time
+}
+type nodeTickMsg struct{}
 type quitMsg struct{}
 
 func New(cfg *config.Config, c *status.Collector, version string) Model {
@@ -132,7 +144,7 @@ func Run(m Model) error {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.collect(), m.tick(), (&m).fetchPayouts(), m.payTick(), (&m).fetchPrice(), m.priceTick())
+	return tea.Batch(m.collect(), m.tick(), (&m).fetchPayouts(), m.payTick(), (&m).fetchPrice(), m.priceTick(), (&m).pingNode(), m.nodeTick())
 }
 
 func (m Model) priceTick() tea.Cmd {
@@ -154,6 +166,36 @@ func (m *Model) fetchPrice() tea.Cmd {
 		defer cancel()
 		q, err := price.Fetch(ctx, c, price.URL, time.Now())
 		return priceMsg{q: q, err: err}
+	}
+}
+
+func (m Model) nodeTick() tea.Cmd {
+	if m.cfg.P2Pool.ParamsFile == "" {
+		return nil
+	}
+	return tea.Tick(nodeEvery, func(time.Time) tea.Msg { return nodeTickMsg{} })
+}
+
+// pingNode reads the node from P2Pool's config each time (moneroid node select
+// may switch it) and pings it the way P2Pool reaches it (socks5 if set).
+func (m *Model) pingNode() tea.Cmd {
+	path := m.cfg.P2Pool.ParamsFile
+	if path == "" || m.pinging {
+		return nil
+	}
+	m.pinging = true
+	return func() tea.Msg {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return &nodePing{err: err.Error(), at: time.Now()}
+		}
+		p := node.ReadParams(b)
+		if p.Node.Host == "" {
+			return &nodePing{err: "no host in " + path, at: time.Now()}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		return &nodePing{r: node.Ping(ctx, node.NewHTTPClient(p.Dialer()), p.Node), at: time.Now()}
 	}
 }
 
@@ -253,6 +295,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.fetchPayouts(), m.payTick())
 	case priceTickMsg:
 		return m, tea.Batch(m.fetchPrice(), m.priceTick())
+	case nodeTickMsg:
+		return m, tea.Batch(m.pingNode(), m.nodeTick())
+	case *nodePing:
+		m.pinging, m.node = false, msg
+		if l := msg.r.LatencyMs; l != nil && msg.err == "" && msg.r.Error == "" {
+			m.nodeMs = append(m.nodeMs, *l)
+			if len(m.nodeMs) > 5 {
+				m.nodeMs = m.nodeMs[len(m.nodeMs)-5:]
+			}
+		}
+		return m, nil
 	case priceMsg:
 		m.pricing, m.priceErr = false, ""
 		if msg.err != nil {

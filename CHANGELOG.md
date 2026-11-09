@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.6 — 2026-11-09
+
+- TUI: pings, as in Gupax (spec UI-08). A `node` line under `P2POOL` pings the Monero node from P2Pool's config every minute (one `get_info`, through P2Pool's `socks5` if set): latency with the median of the last 5 (single slow answers over a VPN are common), sync state, height. A `PEERS` block lists the connected P2Pool peers sorted by ping — address, ping, connection age, direction, software — with min/median/max; it takes only the rows the screen has left, so warnings and issues stay visible.
+
 ## v0.5.5 — 2026-11-09
 
 - TUI: the 10-minute sparkline is scaled to its own range (at least the top 10 %), so a steady hashrate shows its variation instead of a flat bar at the top; the label gives the scale (`13055–14506 H/s`). On a console font without eighth blocks it is a thin trace of `_ ─ ¯` rather than solid shades, which merged with the full hugepages meter above; a blank line separates the two when the terminal is at least 30 rows high.

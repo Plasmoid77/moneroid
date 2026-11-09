@@ -137,7 +137,20 @@ func Probe(ctx context.Context, client *http.Client, d Dialer, c Candidate) Resu
 	return *first
 }
 
-func probeAddr(ctx context.Context, client *http.Client, d Dialer, c Candidate, addr string) Result {
+// Ping is one get_info round trip to the first address of c that answers:
+// latency, height and sync state without the heavier checks of Probe (the TUI
+// asks every minute, possibly over a metered uplink).
+func Ping(ctx context.Context, client *http.Client, c Candidate) Result {
+	res := Result{Candidate: c, Error: "no address"}
+	for _, addr := range resolve(ctx, c.Host) {
+		if res = getInfo(ctx, client, c, addr); res.Error == "" {
+			break
+		}
+	}
+	return res
+}
+
+func getInfo(ctx context.Context, client *http.Client, c Candidate, addr string) Result {
 	res := Result{Candidate: c, Addr: addr}
 	o, took, err := rpc(ctx, client, addr, c.RPC, "get_info", "{}")
 	if err != nil {
@@ -153,6 +166,14 @@ func probeAddr(ctx context.Context, client *http.Client, d Dialer, c Candidate, 
 		if b, ok := r["synchronized"].(bool); ok {
 			res.Synchronized = &b
 		}
+	}
+	return res
+}
+
+func probeAddr(ctx context.Context, client *http.Client, d Dialer, c Candidate, addr string) Result {
+	res := getInfo(ctx, client, c, addr)
+	if res.Error != "" {
+		return res
 	}
 	if res.Height != nil && *res.Height > 100 {
 		h, _, err := rpc(ctx, client, res.Addr, c.RPC, "get_block_headers_range", fmt.Sprintf(`{"start_height":%d,"end_height":%d}`, *res.Height-101, *res.Height-1))
