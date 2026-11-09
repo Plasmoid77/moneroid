@@ -55,6 +55,7 @@ Generated from a live snapshot on 2026-09-11. All numeric fields and `connected`
 | `p2pool.stratum_connections` | integer |
 | `p2pool.network_height` | integer |
 | `p2pool.network_difficulty` | integer |
+| `p2pool.network_reward_atomic` | integer, atomic units (since v0.5.2) |
 | `p2pool.pool_hashrate_hs` | integer |
 | `p2pool.sidechain_height` | integer |
 | `p2pool.sidechain_difficulty` | integer |

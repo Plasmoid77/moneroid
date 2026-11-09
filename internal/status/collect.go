@@ -236,6 +236,7 @@ func (c *Collector) applyP2Pool(s *Snapshot, files map[string]p2pool.File, now t
 		r := reader{o, s, SrcP2PoolNetwork}
 		m.NetworkHeight = r.Int("height")
 		m.NetworkDifficulty = r.Float("difficulty")
+		m.NetworkReward = r.Int("reward")
 	}
 	s.Sources[SrcP2PoolNetwork] = nw
 

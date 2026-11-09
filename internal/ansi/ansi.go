@@ -1,6 +1,6 @@
 // Package ansi holds the few SGR sequences Moneroid uses: Monero orange
-// (#FF8000: a touch lighter than the #FF6600 of the logo, so that 256-colour
-// terminals land on 208 instead of the reddish 202) and white. Colour never carries meaning
+// (#FF6600, exactly the fill of the official logo; 256-colour terminals show
+// the nearest 202) and white. Colour never carries meaning
 // alone (UI-06); every state is also written as text. Sequences are emitted
 // as truecolor and downsampled by the writer (colorprofile) or by Bubble Tea,
 // which also honour NO_COLOR and non-TTY output.
@@ -10,8 +10,8 @@ import "strings"
 
 const (
 	reset    = "\x1b[0m"
-	orange   = "\x1b[38;2;255;128;0m"
-	onOrange = "\x1b[1;97;48;2;255;128;0m"
+	orange   = "\x1b[38;2;255;102;0m"
+	onOrange = "\x1b[1;97;48;2;255;102;0m"
 	white    = "\x1b[1;97m"
 	dim      = "\x1b[2m"
 	red      = "\x1b[1;31m"

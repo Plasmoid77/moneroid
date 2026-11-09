@@ -34,7 +34,8 @@ type Config struct {
 		TokenFile  string `toml:"token_file"`
 	} `toml:"xmrig"`
 	UI struct {
-		RefreshMs int `toml:"refresh_ms"`
+		RefreshMs int  `toml:"refresh_ms"`
+		Price     bool `toml:"price"` // TUI: XMR in USD/EUR from CoinGecko (PRICE-01); false = no request at all
 	} `toml:"ui"`
 	Guard Guard `toml:"guard"`
 }
@@ -54,7 +55,7 @@ var unitRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.@:-]*\.service$`)
 // Load reads and validates the file at path. Missing file is an error (CFG-01).
 func Load(path string) (*Config, error) {
 	var c Config
-	c.UI.RefreshMs = 1000
+	c.UI.RefreshMs, c.UI.Price = 1000, true
 	c.Guard = Guard{IntervalS: 30, HoldAfter: 3, ReleaseAfter: 3, Repair: true, RepairAfterS: 1200, RepairCooldownS: 3600}
 	md, err := toml.DecodeFile(path, &c)
 	if err != nil {

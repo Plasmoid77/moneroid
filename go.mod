@@ -1,6 +1,6 @@
 module github.com/Plasmoid77/moneroid
 
-go 1.27.0
+go 1.27.3
 
 require (
 	charm.land/bubbletea/v2 v2.0.9

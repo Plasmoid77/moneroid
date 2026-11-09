@@ -16,6 +16,7 @@ expected_id = "moneroid-xmrig"
 
 [ui]
 refresh_ms = 1000
+# price = true               # TUI: XMR in USD/EUR from CoinGecko every 10 min; false = no request at all
 
 # [guard]                    # moneroid-guard.service; every key is optional (spec §7.1)
 # interval_s = 30            # poll period, 10..600
