@@ -49,6 +49,13 @@ while [ $# -gt 0 ]; do
 done
 
 die() { echo "install.sh: $*" >&2; exit 1; }
+NL='
+'
+ok() { # value extended-regex: the whole value matches. grep matches line by line, so a value with a
+	# newline would pass on one good line and carry the rest into the sed programs below.
+	case $1 in *"$NL"*) return 1 ;; esac
+	printf '%s' "$1" | grep -Eq "$2"
+}
 # i2pd.conf readers: comments stripped, "key = value" or "key=value", indented lines tolerated.
 i2pd_ep() { # section default-address:port → address:port
 	awk -v want="$1" -v def="$2" '
@@ -89,7 +96,7 @@ fi
 
 # Values go into sed programs and config files: allow only the characters they can legitimately contain.
 if [ -n "$WALLET" ]; then
-	printf '%s' "$WALLET" | grep -Eq '^4[1-9A-HJ-NP-Za-km-z]{94}$' || die "--wallet must be a 95-character base58 primary address starting with 4"
+	ok "$WALLET" '^4[1-9A-HJ-NP-Za-km-z]{94}$' || die "--wallet must be a 95-character base58 primary address starting with 4"
 else [ -f /etc/moneroid/p2pool.conf ] || die "--wallet 4… is required (primary address, not a subaddress)"; fi
 case $SIDECHAIN in mini | nano | main) ;; *) die "--sidechain must be mini, nano or main" ;; esac
 NODE_HOST='' NODE_RPC='' NODE_ZMQ=''
@@ -99,7 +106,7 @@ if [ -n "$NODE" ]; then
 	*) NODE_HOST=${NODE%%:*}; rest=${NODE#*:} ;;
 	esac
 	NODE_RPC=${rest%%:*}; NODE_ZMQ=${rest##*:}
-	printf '%s' "$NODE_HOST" | grep -Eq '^[A-Za-z0-9.:-]+$' && printf '%s:%s' "$NODE_RPC" "$NODE_ZMQ" | grep -Eq '^[0-9]{1,5}:[0-9]{1,5}$' \
+	ok "$NODE_HOST" '^[A-Za-z0-9.:-]+$' && ok "$NODE_RPC:$NODE_ZMQ" '^[0-9]{1,5}:[0-9]{1,5}$' \
 		|| die "--node must be HOST:RPC:ZMQ (IPv6 as [addr]:RPC:ZMQ), got $NODE"
 fi
 
@@ -107,15 +114,20 @@ CACHE=${MONEROID_CACHE:-/var/cache/moneroid} # verified downloads are kept here;
 safe() { # path: root-owned and not writable by group/others (a cache anyone else can write could plant a binary)
 	[ -e "$1" ] && [ ! -L "$1" ] && [ "$(stat -c %u "$1")" = 0 ] && [ -z "$(find "$1" -maxdepth 0 -perm /022)" ]
 }
+safe_dir() { # absolute dir: it and every ancestor safe, so nobody but root can swap a directory on the path
+	case $1 in /*) ;; *) return 1 ;; esac
+	d=$1
+	while :; do safe "$d" || return 1; [ "$d" = / ] && return 0; d=$(dirname "$d"); done
+}
 fetch() { # url dest [cache-name]: the cached copy if there is a trustworthy one, else download
-	if [ -n "${3:-}" ] && [ -f "$CACHE/$3" ] && safe "$CACHE" && safe "$CACHE/$3"; then cp "$CACHE/$3" "$2"; return; fi
+	if [ -n "${3:-}" ] && [ -f "$CACHE/$3" ] && safe_dir "$CACHE" && safe "$CACHE/$3"; then cp "$CACHE/$3" "$2"; return; fi
 	if command -v curl >/dev/null; then curl -fsSL --retry 3 -o "$2" "$1"
 	elif command -v wget >/dev/null; then wget -q -O "$2" "$1"
 	else die "curl or wget is required"; fi
 }
 keep() { # file cache-name: cache only into a root-owned, non-writable-by-others directory; install(1) replaces the target instead of following it
 	[ -d "$CACHE" ] || install -d -o root -g root -m 0755 "$CACHE" 2>/dev/null || return 0
-	safe "$CACHE" || { echo "note: $CACHE not root-owned 0755, not caching"; return 0; }
+	safe_dir "$CACHE" || { echo "note: $CACHE or a parent is not root-owned and closed to others, not caching"; return 0; }
 	install -o root -g root -m 0644 "$1" "$CACHE/$2" 2>/dev/null || true
 }
 latest() { # owner/repo option → tag of the newest stable release (GitHub skips drafts and pre-releases)
@@ -124,7 +136,7 @@ latest() { # owner/repo option → tag of the newest stable release (GitHub skip
 	echo "$t"
 }
 verify() { # file sha256 cache-name
-	printf '%s' "$2" | grep -Eq '^[0-9a-f]{64}$' || die "no SHA256 for $1 in the signed checksum list"
+	ok "$2" '^[0-9a-f]{64}$' || die "no SHA256 for $1 in the signed checksum list"
 	echo "$2  $1" | sha256sum -c --quiet - || die "checksum mismatch for $1"
 	keep "$1" "$3"
 }
@@ -149,14 +161,14 @@ if ! command -v gpg >/dev/null; then
 	command -v gpg >/dev/null || die "gpg is required to check the release signatures; install gnupg and re-run"
 fi
 for v in "$MONEROID_VERSION" "$P2POOL_VERSION" "$XMRIG_VERSION"; do # they go into URLs and file names
-	[ -z "$v" ] || printf '%s' "$v" | grep -Eq '^v?[0-9]+(\.[0-9]+){1,3}$' || die "a version looks like v1.2.3, got $v"
+	[ -z "$v" ] || ok "$v" '^v?[0-9]+(\.[0-9]+){1,3}$' || die "a version looks like v1.2.3, got $v"
 done
 # "latest" is whatever the upstream repository marks so; a repository taken over without the signing
 # key could mark an old, genuinely signed release. Without an explicit --*-version never go lower.
 pick() { # name current-value owner/repo option installed-binary
 	if [ -n "$2" ]; then echo "v${2#v}"; return; fi
 	t=$(latest "$3" "$4"); t=v${t#v}
-	printf '%s' "$t" | grep -Eq '^v[0-9]+(\.[0-9]+){1,3}$' || die "unexpected $1 release tag $t (pass $4)"
+	ok "$t" '^v[0-9]+(\.[0-9]+){1,3}$' || die "unexpected $1 release tag $t (pass $4)"
 	i=$(installed "$5")
 	[ -z "$i" ] || ! older "$t" "$i" || die "the newest $1 release $t is older than the installed $i; pass $4 $t to downgrade"
 	echo "$t"
@@ -165,7 +177,16 @@ MONEROID_VERSION=$(pick Moneroid "$MONEROID_VERSION" Plasmoid77/moneroid --moner
 P2POOL_VERSION=$(pick P2Pool "$P2POOL_VERSION" SChernykh/p2pool --p2pool-version p2pool)
 XMRIG_VERSION=$(pick XMRig "$XMRIG_VERSION" xmrig/xmrig --xmrig-version xmrig); XMRIG_VERSION=${XMRIG_VERSION#v}
 
-TMP=$(mktemp -d) && trap 'gpgconf --kill all 2>/dev/null; rm -rf "$TMP"' EXIT
+REPLACED=0
+cleanup() {
+	rc=$?
+	gpgconf --kill all 2>/dev/null; rm -rf "$TMP"
+	if [ $rc != 0 ] && [ $REPLACED = 1 ]; then # the new files are on disk, the services still run the old ones
+		systemctl daemon-reload 2>/dev/null || true
+		echo "install.sh: stopped after the binaries and units were replaced; services were not restarted. Fix the cause and re-run." >&2
+	fi
+}
+TMP=$(mktemp -d) && trap cleanup EXIT
 cd "$TMP"
 GNUPGHOME=$TMP/gnupg && export GNUPGHOME && install -d -m 0700 "$GNUPGHOME"
 echo "installing Moneroid $MONEROID_VERSION, P2Pool $P2POOL_VERSION, XMRig $XMRIG_VERSION…"
@@ -195,11 +216,29 @@ verify xmrig.tar.gz "$(sum_of "$X_TGZ" xmrig.sums)" "$X_TGZ"
 tar xzf p2pool.tar.gz --strip-components=1 --wildcards '*/p2pool'
 tar xzf xmrig.tar.gz --strip-components=1 --wildcards '*/xmrig'
 
+# Everything that can be refused is refused before the first installed file is replaced.
+if [ $I2P = 1 ]; then
+	if ! command -v i2pd >/dev/null; then
+		if command -v apt-get >/dev/null; then { apt-get update -qq && apt-get install -y -qq i2pd; } >/dev/null 2>&1 || true
+		elif command -v pacman >/dev/null; then pacman -S --noconfirm --needed i2pd >/dev/null 2>&1 || true; fi
+		command -v i2pd >/dev/null || die "i2pd not installed; install it and re-run with --i2p"
+	fi
+	# P2Pool proxies every non-private connection, so the node it will use must be LAN/localhost or .b32.i2p:
+	# --node, else the existing config, else the example a fresh config is seeded from.
+	host=$NODE_HOST; conf=/etc/moneroid/p2pool.conf; [ -e $conf ] || conf=examples/p2pool.conf
+	[ -n "$host" ] || host=$(sed -n 's/^host = //p' $conf | tail -1)
+	case $host in
+	10.* | 192.168.* | 172.1[6-9].* | 172.2[0-9].* | 172.3[01].* | 127.* | localhost | ::1 | fc* | fd* | fe80:* | *.b32.i2p) ;;
+	*) die "--i2p needs a node on LAN/localhost or inside I2P: pass --node LAN_IP:RPC:ZMQ (or a .b32.i2p host)" ;;
+	esac
+fi
+
 NOLOGIN=$(command -v nologin || echo /usr/sbin/nologin)
 groupadd -r moneroid 2>/dev/null || true
 useradd -r -g moneroid -s "$NOLOGIN" -d /var/lib/moneroid/p2pool -M moneroid-p2pool 2>/dev/null || true
 useradd -r -g moneroid -s "$NOLOGIN" -d /var/lib/moneroid/xmrig -M moneroid-xmrig 2>/dev/null || true
 
+REPLACED=1
 install -o root -g root -m 0755 moneroid /usr/local/bin/moneroid
 install -o root -g root -m 0755 p2pool /usr/local/bin/p2pool
 install -o root -g root -m 0755 xmrig /usr/local/bin/xmrig
@@ -227,16 +266,6 @@ if [ -n "$NODE" ]; then
 fi
 
 if [ $I2P = 1 ]; then
-	if ! command -v i2pd >/dev/null; then
-		if command -v apt-get >/dev/null; then { apt-get update -qq && apt-get install -y -qq i2pd; } >/dev/null 2>&1 || true
-		elif command -v pacman >/dev/null; then pacman -S --noconfirm --needed i2pd >/dev/null 2>&1 || true; fi
-		command -v i2pd >/dev/null || die "i2pd not installed; install it and re-run with --i2p"
-	fi
-	# P2Pool proxies every non-private connection, so the node in the effective config must be LAN/localhost or .b32.i2p.
-	case $(sed -n 's/^host = //p' /etc/moneroid/p2pool.conf | tail -1) in
-	10.* | 192.168.* | 172.1[6-9].* | 172.2[0-9].* | 172.3[01].* | 127.* | localhost | ::1 | fc* | fd* | fe80:* | *.b32.i2p) ;;
-	*) die "--i2p needs a node on LAN/localhost or inside I2P: pass --node LAN_IP:RPC:ZMQ (or a .b32.i2p host)" ;;
-	esac
 	if grep -q '^nano = 1' /etc/moneroid/p2pool.conf; then p2p_port=37890
 	elif grep -q '^mini = 1' /etc/moneroid/p2pool.conf; then p2p_port=37888
 	else p2p_port=37889; fi
