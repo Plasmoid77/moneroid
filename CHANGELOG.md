@@ -17,9 +17,9 @@ Security
 Fixes
 - Guard: a repair or release decided from a snapshot is re-checked under the lock — a P2Pool the user stopped meanwhile is no longer started again. `moneroid start|stop|restart p2pool` now takes the guard lock too.
 - `status`/`--check`: health is `unknown`, not `ok`, when the sidechain height or the peers' heights are not available (H-03).
-- `payouts` and the TUI parse the journal as it streams: past 1 MiB of matching lines the command failed with a short-write error.
+- `payouts` and the TUI parse the journal as it streams, without a line-length or total-size limit: past 1 MiB of matching lines the command failed with a short-write error.
 - TUI: Start/Restart resets a unit stuck in `start-limit-hit` first, like the CLI (CLI-04); the first requests keep their in-flight flags, so a slow first collection or journal read is not started twice.
-- `install.sh` re-run: only files whose content differs are replaced, and only the running services whose binary, unit or `p2pool.conf` changed are restarted (`systemctl try-restart`). A Moneroid-only update no longer costs a P2Pool resync; an XMRig held by the guard or stopped by you stays stopped.
+- `install.sh` re-run: only files whose content differs are replaced, and only the running services whose binary, unit or `p2pool.conf` content changed are restarted, through `moneroid restart` (serialized with the guard). A Moneroid-only update, or repeating the same `--node`, no longer costs a P2Pool resync; an XMRig held by the guard or stopped by you stays stopped. A run that fails after replacing files remembers the restarts it owes and the next run performs them.
 - `node list/select` probe at most 4 nodes at a time; a long list through a VPN gave false timeouts.
 
 ## v0.5.10 — 2026-11-10

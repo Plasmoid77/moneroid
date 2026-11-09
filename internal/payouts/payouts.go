@@ -59,8 +59,12 @@ func Fetch(ctx context.Context, unit, since string) (*Report, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("journalctl: %w", err)
 	}
-	rep := Parse(unit, out)
-	return finish(rep, stderr.String(), cmd.Wait())
+	rep, perr := Parse(unit, out)
+	err = cmd.Wait() // before stderr is read: os/exec writes it until Wait returns
+	if rep, err := finish(rep, stderr.String(), err); err != nil || perr == nil {
+		return rep, err
+	}
+	return nil, fmt.Errorf("journalctl output: %w", perr)
 }
 
 func journalArgs(unit, since string) []string {
@@ -87,13 +91,15 @@ func finish(rep *Report, stderr string, err error) (*Report, error) {
 	return rep, nil
 }
 
-// Parse extracts payouts from `journalctl -o short-iso` output.
-func Parse(unit string, in io.Reader) *Report {
+// Parse extracts payouts from `journalctl -o short-iso` output. Lines have no length
+// limit (journald caps them itself); a read error is returned with what was parsed.
+func Parse(unit string, in io.Reader) (*Report, error) {
 	r := &Report{SchemaVersion: 1, Unit: unit, Payouts: []Payout{}}
-	sc := bufio.NewScanner(in)
-	sc.Buffer(make([]byte, 64<<10), 1<<20) // a longer line is not a P2Pool payout line
-	for sc.Scan() {
-		line := sc.Text()
+	br := bufio.NewReader(in)
+	var err error
+	for err == nil {
+		var line string
+		line, err = br.ReadString('\n')
 		if m := payoutRe.FindStringSubmatch(line); m != nil {
 			whole, _ := strconv.ParseUint(m[1], 10, 64)
 			frac, _ := strconv.ParseUint(m[2], 10, 64)
@@ -112,9 +118,11 @@ func Parse(unit string, in io.Reader) *Report {
 			r.BlocksWithout++
 		}
 	}
-	io.Copy(io.Discard, in) // after an overlong line: let journalctl finish instead of blocking on a full pipe
 	r.TotalXMR = FormatXMR(r.TotalAtomicUnits)
-	return r
+	if err == io.EOF {
+		err = nil
+	}
+	return r, err
 }
 
 // FormatXMR prints atomic units as P2Pool does: integer part, 12 decimals.
