@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.4 — 2026-11-09
+
+- Linux console: instead of a fixed CP437 list, the TUI and `status` ask the kernel which characters the loaded console font has (`GIO_UNIMAP`) and replace only the missing ones. With console-setup installed (Debian's default Lat15 font) `€`, `—` and `…` show as they are; v0.5.3 also put `▓` into the sparkline, which Lat15 lacks.
+- Durations are written with a space: `3m 05s`, `12h 07m` (TUI, `status`); the TUI uptime column is one cell wider.
+
 ## v0.5.3 — 2026-11-09
 
 - TUI and `status` on the Linux console (`TERM=linux`, e.g. the server's own monitor): the kernel's built-in font has only CP437, so `€`, `—`, `…` and the sparkline's `▁▂▃▅▆▇` showed as squares. There they are now written as `EUR`, `-`, `...` and a `░▒▓█` sparkline (spec UI-06).

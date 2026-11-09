@@ -3,6 +3,7 @@ package ansi
 import (
 	"io"
 	"math"
+	"os"
 	"strings"
 	"testing"
 )
@@ -24,17 +25,35 @@ func TestBar(t *testing.T) {
 	}
 }
 
-func TestConsoleSafe(t *testing.T) {
-	if got := ConsoleSafe("€14.20 — loading…"); got != "EUR 14.20 - loading..." {
-		t.Fatalf("ConsoleSafe = %q", got)
+func TestFont(t *testing.T) {
+	if got := KernelFont.Safe("€14.20 — loading… ≈ $1 · ░"); got != "EUR 14.20 - loading... ≈ $1 · ░" {
+		t.Fatalf("KernelFont.Safe = %q", got)
+	}
+	lat15 := NewFont("€—–…·≈←↑→↓§░▒█") // Debian console-setup Lat15-Fixed16
+	if got := lat15.Safe("€1 ▓ ✓"); got != "€1 # ?" {
+		t.Fatalf("lat15.Safe = %q", got)
+	}
+	for f, want := range map[*Font]string{{}: "▁▂▃▄▅▆▇█", &KernelFont: "░░▒▒▓▓██", &lat15: "░░░▒▒▒██", {set: map[rune]bool{}}: ".:-=+*#@"} {
+		if got := string(f.Ramp()); got != want {
+			t.Fatalf("ramp %q, want %q", got, want)
+		}
 	}
 	var b strings.Builder
-	t.Setenv("TERM", "linux")
-	if n, err := ConsoleWriter(&b).Write([]byte("€1")); n != len("€1") || err != nil || b.String() != "EUR 1" {
-		t.Fatalf("console writer: %d %v %q", n, err, b.String())
+	if n, err := KernelFont.Writer(&b).Write([]byte("€1")); n != len("€1") || err != nil || b.String() != "EUR 1" {
+		t.Fatalf("font writer: %d %v %q", n, err, b.String())
 	}
+	if w := (Font{}).Writer(&b); w != io.Writer(&b) || (Font{}).Safe("€") != "€" {
+		t.Fatal("the zero Font must pass everything through")
+	}
+	r, w, _ := os.Pipe()
+	defer r.Close()
+	defer w.Close()
 	t.Setenv("TERM", "xterm-256color")
-	if w := ConsoleWriter(&b); w != io.Writer(&b) {
-		t.Fatal("ConsoleWriter must pass through outside the Linux console")
+	if ConsoleFont(w.Fd()).set != nil {
+		t.Fatal("outside the Linux console the font is unrestricted")
+	}
+	t.Setenv("TERM", "linux")
+	if f := ConsoleFont(w.Fd()); f.Has('€') || !f.Has('▓') {
+		t.Fatal("a non-console fd on TERM=linux must fall back to the kernel font")
 	}
 }

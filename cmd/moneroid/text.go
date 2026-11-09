@@ -116,10 +116,10 @@ func dur(sec *float64) string {
 	}
 	d := time.Duration(*sec * float64(time.Second)).Round(time.Second)
 	if d >= time.Hour {
-		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+		return fmt.Sprintf("%dh %02dm", int(d.Hours()), int(d.Minutes())%60)
 	}
 	if d >= time.Minute {
-		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+		return fmt.Sprintf("%dm %02ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%ds", int(d.Seconds()))
 }
