@@ -1,37 +1,42 @@
 #!/bin/sh
-# Moneroid installer: one P2Pool + XMRig pair under systemd from the official
-# releases, verified against SHA256 pinned below. POSIX sh, idempotent, Linux
-# x86_64 with systemd (Debian/Ubuntu/Arch tested). Re-runs itself under sudo.
+# Moneroid installer: one P2Pool + XMRig pair under systemd from the newest
+# official releases, verified by their authors' signatures. POSIX sh, idempotent,
+# Linux x86_64 with systemd (Debian/Ubuntu/Arch tested). Re-runs itself under sudo.
 #
 #   sh install.sh --wallet 4…                       # mini sidechain, node picked from nodes.txt
 #   sh install.sh --wallet 4… --node HOST:RPC:ZMQ   # fixed Monero node
 #   sh install.sh --wallet 4… --enable --hugepages  # autostart (incl. moneroid-guard) + sysctl/MSR tuning
 #   sh install.sh --wallet 4… --i2p --node LAN_IP:RPC:ZMQ   # P2Pool p2p over I2P (i2pd); node must be private or .b32.i2p
+#   sh install.sh                                   # re-run = update everything to the newest releases
+#   sh install.sh --p2pool-version v4.18 --xmrig-version 6.26.0 --moneroid-version v0.5.1  # pin (rollback, offline)
 #   sh install.sh --uninstall [--purge]             # remove services (and configs/state with --purge)
 #
 # Existing files in /etc/moneroid are never overwritten; delete them to re-seed.
-# Verified downloads are cached in /var/cache/moneroid (MONEROID_CACHE); pre-fill it to install offline.
+# Verified downloads are cached in /var/cache/moneroid (MONEROID_CACHE); with it pre-filled and all
+# three versions given, the install works offline.
 set -eu
 
-MONEROID_VERSION=v0.5.0
-MONEROID_SHA256=b88538d79a00f5c1d83af41188c8392e9cd6aaee1e5f58fa5faebaf1ff839bcf
-EXTRAS_SHA256=c0d9f246cea343b669cf7dfde62362b6444ffac45e4ac2007051590b25eac09a
-P2POOL_VERSION=v4.18
-P2POOL_SHA256=893691726b0218fe1883a7a326e2c69db4eb228fc72ba00c8adfa6be85b8a415 # from sha256sums.txt.asc, signature checked
-XMRIG_VERSION=6.26.0
-XMRIG_SHA256=fc6f8ae5f64e4f17481f7e3be29a1c56949f216a998414188003eae1db20c9e5 # from SHA256SUMS
+# A download is accepted only if its SHA256 is listed in a checksum file signed by the
+# primary key pinned here (P2Pool, XMRig); the public keys ship in keys/ of the Moneroid release.
+# Moneroid itself is checked against SHA256SUMS of its release (same trust as this script).
+P2POOL_KEY=1FCAAB4D3DC3310D16CBD508C47F82B54DA87ADF # SChernykh, as in monero-project/gitian.sigs
+XMRIG_KEY=9AC4CEA8E66E35A5C7CDDC1B446A53638BE94409  # XMRig <support@xmrig.com>, xmrig/xmrig doc/gpg_keys
 
-usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 case " $* " in *" -h "* | *" --help "*) usage ;; esac
 [ "$(id -u)" -eq 0 ] || exec sudo -- sh "$0" --user "$(id -un)" "$@"
 
 WALLET='' SIDECHAIN=mini NODE='' ENABLE=0 HUGEPAGES=0 I2P=0 OPERATOR=${SUDO_USER:-} UNINSTALL=0 PURGE=0
+MONEROID_VERSION='' P2POOL_VERSION='' XMRIG_VERSION='' # empty = the newest stable release
 while [ $# -gt 0 ]; do
 	case $1 in
 	--wallet) WALLET=$2; shift ;;
 	--sidechain) SIDECHAIN=$2; shift ;;
 	--node) NODE=$2; shift ;;
 	--user) OPERATOR=$2; shift ;;
+	--moneroid-version) MONEROID_VERSION=$2; shift ;;
+	--p2pool-version) P2POOL_VERSION=$2; shift ;;
+	--xmrig-version) XMRIG_VERSION=$2; shift ;;
 	--enable) ENABLE=1 ;;
 	--hugepages) HUGEPAGES=1 ;;
 	--i2p) I2P=1 ;;
@@ -58,7 +63,7 @@ i2pd_tdir() {
 	echo "$d"
 }
 command -v systemctl >/dev/null || die "systemd is required"
-[ "$(uname -m)" = x86_64 ] || die "only Linux x86_64 binaries are pinned here"
+[ "$(uname -m)" = x86_64 ] || die "only Linux x86_64 release binaries are installed here"
 
 UNITS="moneroid-p2pool.service moneroid-xmrig.service"
 if [ $UNINSTALL = 1 ]; then
@@ -99,31 +104,94 @@ if [ -n "$NODE" ]; then
 fi
 
 CACHE=${MONEROID_CACHE:-/var/cache/moneroid} # verified downloads are kept here; pre-fill it to install offline
-fetch() { # url dest
-	if [ "$2" != - ] && [ -f "$CACHE/${1##*/}" ] && [ ! -L "$CACHE/${1##*/}" ]; then cp "$CACHE/${1##*/}" "$2"; return; fi
+safe() { # path: root-owned and not writable by group/others (a cache anyone else can write could plant a binary)
+	[ -e "$1" ] && [ ! -L "$1" ] && [ "$(stat -c %u "$1")" = 0 ] && [ -z "$(find "$1" -maxdepth 0 -perm /022)" ]
+}
+fetch() { # url dest [cache-name]: the cached copy if there is a trustworthy one, else download
+	if [ -n "${3:-}" ] && [ -f "$CACHE/$3" ] && safe "$CACHE" && safe "$CACHE/$3"; then cp "$CACHE/$3" "$2"; return; fi
 	if command -v curl >/dev/null; then curl -fsSL --retry 3 -o "$2" "$1"
 	elif command -v wget >/dev/null; then wget -q -O "$2" "$1"
 	else die "curl or wget is required"; fi
 }
-verify() { # file sha256 url
-	echo "$2  $1" | sha256sum -c --quiet - || die "checksum mismatch for $1"
-	# cache only into a root-owned, non-writable-by-others directory; install(1) replaces the target instead of following it
+keep() { # file cache-name: cache only into a root-owned, non-writable-by-others directory; install(1) replaces the target instead of following it
 	[ -d "$CACHE" ] || install -d -o root -g root -m 0755 "$CACHE" 2>/dev/null || return 0
-	[ "$(stat -c %u "$CACHE")" = 0 ] && [ -z "$(find "$CACHE" -maxdepth 0 -perm /022)" ] || { echo "note: $CACHE not root-owned 0755, not caching"; return 0; }
-	install -o root -g root -m 0644 "$1" "$CACHE/${3##*/}" 2>/dev/null || true
+	safe "$CACHE" || { echo "note: $CACHE not root-owned 0755, not caching"; return 0; }
+	install -o root -g root -m 0644 "$1" "$CACHE/$2" 2>/dev/null || true
 }
+latest() { # owner/repo option → tag of the newest stable release (GitHub skips drafts and pre-releases)
+	t=$(fetch "https://api.github.com/repos/$1/releases/latest" - | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/') || true
+	[ -n "$t" ] || die "cannot ask GitHub for the newest $1 release (offline? pass $2)"
+	echo "$t"
+}
+verify() { # file sha256 cache-name
+	printf '%s' "$2" | grep -Eq '^[0-9a-f]{64}$' || die "no SHA256 for $1 in the signed checksum list"
+	echo "$2  $1" | sha256sum -c --quiet - || die "checksum mismatch for $1"
+	keep "$1" "$3"
+}
+sum_of() { # file-name list: "HASH  NAME" / "HASH *NAME" lines (sha256sum) or "Name:"/"SHA256:" pairs (P2Pool)
+	awk -v f="$1" '$1 == "Name:" { n = $2 } $1 == "SHA256:" && n == f { print tolower($2); exit }
+		NF == 2 && length($1) == 64 && $1 !~ /[^0-9A-Fa-f]/ && ($2 == f || $2 == "*" f) { print tolower($1); exit }' "$2"
+}
+signed() { # primary-key-fingerprint gpg-arguments…: a good signature by exactly that key
+	k=$1; shift
+	gpg --batch --no-tty --quiet --status-file gpg.status "$@" 2>/dev/null && grep -Eq "^\[GNUPG:\] VALIDSIG .* $k\$" gpg.status &&
+		! grep -Eq '^\[GNUPG:\] (REVKEYSIG|KEYREVOKED|EXPKEYSIG|KEYEXPIRED)' gpg.status
+}
+installed() { # binary → its installed version (v1.2.3), empty if none
+	[ -x "/usr/local/bin/$1" ] && "/usr/local/bin/$1" --version 2>/dev/null | head -1 | grep -Eo 'v?[0-9]+(\.[0-9]+){1,3}' | head -1 | sed 's/^v*/v/' || true
+}
+older() { # a b: version a is lower than b
+	[ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
+}
+if ! command -v gpg >/dev/null; then
+	if command -v apt-get >/dev/null; then { apt-get update -qq && apt-get install -y -qq gpg; } >/dev/null 2>&1 || true
+	elif command -v pacman >/dev/null; then pacman -S --noconfirm --needed gnupg >/dev/null 2>&1 || true; fi
+	command -v gpg >/dev/null || die "gpg is required to check the release signatures; install gnupg and re-run"
+fi
+for v in "$MONEROID_VERSION" "$P2POOL_VERSION" "$XMRIG_VERSION"; do # they go into URLs and file names
+	[ -z "$v" ] || printf '%s' "$v" | grep -Eq '^v?[0-9]+(\.[0-9]+){1,3}$' || die "a version looks like v1.2.3, got $v"
+done
+# "latest" is whatever the upstream repository marks so; a repository taken over without the signing
+# key could mark an old, genuinely signed release. Without an explicit --*-version never go lower.
+pick() { # name current-value owner/repo option installed-binary
+	if [ -n "$2" ]; then echo "v${2#v}"; return; fi
+	t=$(latest "$3" "$4"); t=v${t#v}
+	printf '%s' "$t" | grep -Eq '^v[0-9]+(\.[0-9]+){1,3}$' || die "unexpected $1 release tag $t (pass $4)"
+	i=$(installed "$5")
+	[ -z "$i" ] || ! older "$t" "$i" || die "the newest $1 release $t is older than the installed $i; pass $4 $t to downgrade"
+	echo "$t"
+}
+MONEROID_VERSION=$(pick Moneroid "$MONEROID_VERSION" Plasmoid77/moneroid --moneroid-version moneroid)
+P2POOL_VERSION=$(pick P2Pool "$P2POOL_VERSION" SChernykh/p2pool --p2pool-version p2pool)
+XMRIG_VERSION=$(pick XMRig "$XMRIG_VERSION" xmrig/xmrig --xmrig-version xmrig); XMRIG_VERSION=${XMRIG_VERSION#v}
 
-TMP=$(mktemp -d) && trap 'rm -rf "$TMP"' EXIT
+TMP=$(mktemp -d) && trap 'gpgconf --kill all 2>/dev/null; rm -rf "$TMP"' EXIT
 cd "$TMP"
-echo "downloading Moneroid $MONEROID_VERSION, P2Pool $P2POOL_VERSION, XMRig $XMRIG_VERSION…"
-URL_MONEROID="https://github.com/Plasmoid77/moneroid/releases/download/$MONEROID_VERSION/moneroid-$MONEROID_VERSION-linux-amd64"
-URL_EXTRAS="https://github.com/Plasmoid77/moneroid/releases/download/$MONEROID_VERSION/moneroid-$MONEROID_VERSION-extras.tar.gz"
-URL_P2POOL="https://github.com/SChernykh/p2pool/releases/download/$P2POOL_VERSION/p2pool-$P2POOL_VERSION-linux-x64.tar.gz"
-URL_XMRIG="https://github.com/xmrig/xmrig/releases/download/v$XMRIG_VERSION/xmrig-$XMRIG_VERSION-linux-static-x64.tar.gz"
-fetch "$URL_MONEROID" moneroid; fetch "$URL_EXTRAS" extras.tar.gz; fetch "$URL_P2POOL" p2pool.tar.gz; fetch "$URL_XMRIG" xmrig.tar.gz
-verify moneroid "$MONEROID_SHA256" "$URL_MONEROID"; verify extras.tar.gz "$EXTRAS_SHA256" "$URL_EXTRAS"
-verify p2pool.tar.gz "$P2POOL_SHA256" "$URL_P2POOL"; verify xmrig.tar.gz "$XMRIG_SHA256" "$URL_XMRIG"
-tar xzf extras.tar.gz
+GNUPGHOME=$TMP/gnupg && export GNUPGHOME && install -d -m 0700 "$GNUPGHOME"
+echo "installing Moneroid $MONEROID_VERSION, P2Pool $P2POOL_VERSION, XMRig $XMRIG_VERSION…"
+REL=https://github.com/Plasmoid77/moneroid/releases/download/$MONEROID_VERSION
+M_BIN=moneroid-$MONEROID_VERSION-linux-amd64 M_EXTRAS=moneroid-$MONEROID_VERSION-extras.tar.gz
+fetch "$REL/SHA256SUMS" moneroid.sums "moneroid-$MONEROID_VERSION-SHA256SUMS" || die "Moneroid $MONEROID_VERSION has no SHA256SUMS (v0.5.1 or newer is needed)"
+fetch "$REL/$M_BIN" moneroid "$M_BIN"; fetch "$REL/$M_EXTRAS" extras.tar.gz "$M_EXTRAS"
+verify moneroid "$(sum_of "$M_BIN" moneroid.sums)" "$M_BIN"; verify extras.tar.gz "$(sum_of "$M_EXTRAS" moneroid.sums)" "$M_EXTRAS"
+keep moneroid.sums "moneroid-$MONEROID_VERSION-SHA256SUMS"
+tar xzf extras.tar.gz systemd examples keys docs # only these members: nothing may land next to gnupg/ or gpg.status
+[ -f keys/p2pool-SChernykh.asc ] && [ -f keys/xmrig.asc ] || die "Moneroid $MONEROID_VERSION has no keys/ (v0.5.1 or newer is needed)"
+gpg --batch --quiet --import keys/p2pool-SChernykh.asc keys/xmrig.asc 2>/dev/null || die "cannot import the signing keys from keys/"
+
+P_TGZ=p2pool-$P2POOL_VERSION-linux-x64.tar.gz
+fetch "https://github.com/SChernykh/p2pool/releases/download/$P2POOL_VERSION/sha256sums.txt.asc" p2pool.asc "p2pool-$P2POOL_VERSION-sha256sums.txt.asc"
+signed "$P2POOL_KEY" --output p2pool.sums --decrypt p2pool.asc || die "P2Pool $P2POOL_VERSION: sha256sums.txt.asc is not signed by $P2POOL_KEY"
+keep p2pool.asc "p2pool-$P2POOL_VERSION-sha256sums.txt.asc"
+fetch "https://github.com/SChernykh/p2pool/releases/download/$P2POOL_VERSION/$P_TGZ" p2pool.tar.gz "$P_TGZ"
+verify p2pool.tar.gz "$(sum_of "$P_TGZ" p2pool.sums)" "$P_TGZ" # p2pool.sums is the signed text only
+
+X_REL=https://github.com/xmrig/xmrig/releases/download/v$XMRIG_VERSION X_TGZ=xmrig-$XMRIG_VERSION-linux-static-x64.tar.gz
+fetch "$X_REL/SHA256SUMS" xmrig.sums "xmrig-$XMRIG_VERSION-SHA256SUMS"; fetch "$X_REL/SHA256SUMS.sig" xmrig.sig "xmrig-$XMRIG_VERSION-SHA256SUMS.sig"
+signed "$XMRIG_KEY" --verify xmrig.sig xmrig.sums || die "XMRig $XMRIG_VERSION: SHA256SUMS is not signed by $XMRIG_KEY"
+keep xmrig.sums "xmrig-$XMRIG_VERSION-SHA256SUMS"; keep xmrig.sig "xmrig-$XMRIG_VERSION-SHA256SUMS.sig"
+fetch "$X_REL/$X_TGZ" xmrig.tar.gz "$X_TGZ"
+verify xmrig.tar.gz "$(sum_of "$X_TGZ" xmrig.sums)" "$X_TGZ"
 tar xzf p2pool.tar.gz --strip-components=1 --wildcards '*/p2pool'
 tar xzf xmrig.tar.gz --strip-components=1 --wildcards '*/xmrig'
 
@@ -211,7 +279,9 @@ fi
 
 systemctl daemon-reload
 if [ -n "$OPERATOR" ] && [ "$OPERATOR" != root ]; then
-	usermod -aG moneroid "$OPERATOR" && echo "added $OPERATOR to group moneroid (re-login to read the Data API)"
+	# moneroid: the Data API and configs; systemd-journal: logs and payouts (moneroid logs/payouts, TUI)
+	groups=moneroid; getent group systemd-journal >/dev/null && groups=moneroid,systemd-journal
+	usermod -aG "$groups" "$OPERATOR" && echo "added $OPERATOR to groups $groups (log in again to use them)"
 fi
 
 # Only a freshly seeded config still points at the example node; an existing 127.0.0.1 may be a real local monerod.

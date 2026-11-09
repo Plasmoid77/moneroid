@@ -1,6 +1,6 @@
 # Installing Moneroid
 
-The fast path is `install.sh` from the repository root (see README): it performs exactly steps 1–4 below with pinned upstream versions and SHA256 verification, idempotently, as a user with sudo. Below are the same steps by hand, as root unless noted; the Moneroid binary itself does none of this (spec INSTALL-01).
+The fast path is `install.sh` from the repository root (see README): it performs exactly steps 1–4 below with the newest upstream releases verified by their authors' signatures (spec INSTALL-06), idempotently, as a user with sudo. Below are the same steps by hand, as root unless noted; the Moneroid binary itself does none of this (spec INSTALL-01).
 
 ## Migrating from Monerizer (before v0.4.0)
 
@@ -9,8 +9,9 @@ The project was renamed; the unit, group, user and path names changed (`monerize
 ## 1. Upstream binaries
 
 ```sh
-# P2Pool: tar.gz + sha256sums.txt.asc, SChernykh's key 1FCA AB4D 3DC3 310D 16CB D508 C47F 82B5 4DA8 7ADF
-# XMRig:  tar.gz + SHA256SUMS
+# P2Pool: tar.gz + sha256sums.txt.asc, signed by SChernykh  1FCA AB4D 3DC3 310D 16CB D508 C47F 82B5 4DA8 7ADF (keys/p2pool-SChernykh.asc)
+# XMRig:  tar.gz + SHA256SUMS + SHA256SUMS.sig, signed by XMRig  9AC4 CEA8 E66E 35A5 C7CD DC1B 446A 5363 8BE9 4409 (keys/xmrig.asc)
+#   gpg --import keys/*.asc; gpg --verify sha256sums.txt.asc; gpg --verify SHA256SUMS.sig SHA256SUMS; then sha256sum -c
 install -o root -g root -m 0755 p2pool /usr/local/bin/p2pool
 install -o root -g root -m 0755 xmrig  /usr/local/bin/xmrig
 ```
