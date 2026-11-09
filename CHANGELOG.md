@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.9 — 2026-11-10
+
+- TUI: the XMR rate from three sources at once — CoinGecko, Kraken (the official Monero GUI wallet's default) and CoinPaprika, asked in parallel. A new `rates` line shows each one (stale with the reason when it fails); the `EARNINGS` rate and all USD/EUR amounts use the median of those that answered (spec PRICE-01, UI-07). On a narrow terminal the sources that do not fit move to the next line instead of being cut off (found by an independent Codex review).
+- TUI: the `PEERS` table from v0.5.6 is gone. P2Pool chooses its peers itself, at random by design, so there is nothing to act on; the `node` ping line stays.
+- TUI: P2Pool's version next to `P2POOL`, as XMRig's already is — read from the unit's binary (`p2pool --version`) once per P2Pool run (spec UI-09).
+
 ## v0.5.8 — 2026-11-10
 
 - TUI: a second source for the XMR rate. When CoinGecko fails (timeout, `HTTP 429` — common behind a shared VPN exit), CoinPaprika is asked; it is one of the two providers of the official Monero GUI wallet and not an exchange. A rate that its provider last updated more than an hour ago is refused (found by an independent Codex review), so a stalled source cannot pass for fresh. The rate line names the source it came from; with both down, both reasons are shown. Each request has a 10 s timeout (spec PRICE-01, PRICE-02).
