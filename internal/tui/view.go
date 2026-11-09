@@ -16,11 +16,7 @@ func (m Model) View() tea.View {
 	if m.quitting {
 		return tea.NewView("") // with the ClearScreen before Quit this leaves a clean screen even without an alternate screen
 	}
-	body := m.render()
-	if m.vt {
-		body = ansi.ConsoleSafe(body)
-	}
-	v := tea.NewView(body)
+	v := tea.NewView(m.font.Safe(m.render()))
 	v.AltScreen = true
 	v.WindowTitle = "moneroid"
 	return v
@@ -42,13 +38,13 @@ func (m Model) render() string {
 	var b strings.Builder
 	b.WriteString(ansi.Banner(pad(fmt.Sprintf("%s   %s   health %s   collected %s ago", title, s.CollectedAt.Local().Format("15:04:05 MST"), strings.ToUpper(s.Health.Level), ago(s.CollectedAt)), w)) + "\n\n")
 
-	fmt.Fprintf(&b, "  %s\n", ansi.Orange(fmt.Sprintf("%-28s %-18s %-9s %-8s %s", "SERVICE", "STATE", "ENABLED", "UPTIME", "RESTARTS")))
+	fmt.Fprintf(&b, "  %s\n", ansi.Orange(fmt.Sprintf("%-28s %-18s %-9s %-9s %s", "SERVICE", "STATE", "ENABLED", "UPTIME", "RESTARTS")))
 	for _, sv := range []status.Service{s.Services.P2Pool, s.Services.XMRig} {
 		state := sv.ActiveState + "/" + sv.SubState
 		if sv.LoadState != "loaded" && sv.LoadState != "" {
 			state = sv.LoadState
 		}
-		fmt.Fprintf(&b, "  %-28s %s %-9s %-8s %s\n", sv.Unit, ansi.Unit(fmt.Sprintf("%-18s", state)), sv.EnabledState, dur(sv.UptimeSeconds), i64(sv.RestartCount))
+		fmt.Fprintf(&b, "  %-28s %s %-9s %-9s %s\n", sv.Unit, ansi.Unit(fmt.Sprintf("%-18s", state)), sv.EnabledState, dur(sv.UptimeSeconds), i64(sv.RestartCount))
 	}
 
 	x := s.XMRig
@@ -331,12 +327,9 @@ func (m Model) sparkline(width int) string {
 	if width > 120 {
 		width = 120
 	}
-	ramp := []rune("▁▂▃▄▅▆▇█")
-	switch {
-	case m.ascii:
+	ramp := m.font.Ramp()
+	if m.ascii {
 		ramp = []rune(".:-=+*#@")
-	case m.vt: // the kernel font has no ▁▂▃▅▆▇
-		ramp = []rune("░░▒▒▓▓██")
 	}
 	pts := m.history
 	if len(pts) > width {
@@ -425,9 +418,9 @@ func dur(sec *float64) string {
 	d := time.Duration(*sec * float64(time.Second)).Round(time.Second)
 	switch {
 	case d >= time.Hour:
-		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+		return fmt.Sprintf("%dh %02dm", int(d.Hours()), int(d.Minutes())%60)
 	case d >= time.Minute:
-		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+		return fmt.Sprintf("%dm %02ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%ds", int(d.Seconds()))
 }

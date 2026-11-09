@@ -74,7 +74,7 @@ type Model struct {
 	history    []point
 	lastInv    string
 	ascii      bool
-	vt         bool // Linux console: CP437-only kernel font (ansi.LinuxConsole)
+	font       ansi.Font // what the terminal draws (the console font on TERM=linux)
 	pay        *payouts.Report
 	payErr     string
 	priceHTTP  *http.Client // nil = price display off (ui.price = false)
@@ -106,7 +106,7 @@ func New(cfg *config.Config, c *status.Collector, version string) Model {
 	lang := strings.ToUpper(os.Getenv("LC_ALL") + os.Getenv("LC_CTYPE") + os.Getenv("LANG"))
 	host, _ := os.Hostname()
 	m := Model{cfg: cfg, collector: c, run: systemd.ExecRunner, version: version, host: host,
-		ascii: !strings.Contains(lang, "UTF-8") && !strings.Contains(lang, "UTF8"), vt: ansi.LinuxConsole()}
+		ascii: !strings.Contains(lang, "UTF-8") && !strings.Contains(lang, "UTF8"), font: ansi.ConsoleFont(os.Stdout.Fd())}
 	if cfg.UI.Price {
 		m.priceHTTP = priceClient(cfg)
 	}

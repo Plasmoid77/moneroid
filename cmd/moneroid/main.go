@@ -156,7 +156,7 @@ func cmdStatus(cfgPath string, args []string) int {
 			return exitCheck
 		}
 	} else {
-		printStatus(ansi.ConsoleWriter(colorprofile.NewWriter(os.Stdout, os.Environ())), snap) // strips colour for pipes and NO_COLOR
+		printStatus(ansi.ConsoleFont(os.Stdout.Fd()).Writer(colorprofile.NewWriter(os.Stdout, os.Environ())), snap) // strips colour for pipes and NO_COLOR
 	}
 	if *check && snap.Health.Level != status.LevelOK {
 		return exitCheck
