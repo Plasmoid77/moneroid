@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -81,10 +83,14 @@ type Model struct {
 	payErr     string
 	priceHTTP  *http.Client // nil = price display off (ui.price = false)
 	pricing    bool         // a price request is in flight
-	quote      *price.Quote // last good quote, kept on errors
+	quote      *price.Quote // the median of the providers that answered last, kept when none did
+	rates      []rate       // per price.Providers, for the rates line
 	pinging    bool         // a node ping is in flight
-	node       *nodePing    // last node ping
-	nodeMs     []int64      // the last pings that answered (at most 5), for the median
+	p2poolVer  string       // P2Pool's own version, "" when unknown (UI-09)
+	verFor     string       // the P2Pool InvocationID p2poolVer was read for
+	verReading bool
+	node       *nodePing // last node ping
+	nodeMs     []int64   // the last pings that answered (at most 5), for the median
 	priceErr   string
 	version    string
 	host       string
@@ -100,9 +106,12 @@ type payoutsMsg struct {
 	err error
 }
 type payTickMsg struct{}
-type priceMsg struct {
+type priceMsg []price.Result
+
+// rate is one provider's last good quote and its current error.
+type rate struct {
 	q   *price.Quote
-	err error
+	err string
 }
 type priceTickMsg struct{}
 
@@ -113,6 +122,9 @@ type nodePing struct {
 	at  time.Time
 }
 type nodeTickMsg struct{}
+
+// p2poolVerMsg is the version P2Pool reported for one run of its unit.
+type p2poolVerMsg struct{ inv, ver string }
 type quitMsg struct{}
 
 func New(cfg *config.Config, c *status.Collector, version string) Model {
@@ -176,9 +188,50 @@ func (m *Model) fetchPrice() tea.Cmd {
 	m.pricing = true
 	c := m.priceHTTP
 	return func() tea.Msg {
-		q, err := price.FetchAny(context.Background(), c, price.Providers, time.Now)
-		return priceMsg{q: q, err: err}
+		return priceMsg(price.FetchAll(context.Background(), c, price.Providers, time.Now))
 	}
+}
+
+// readP2PoolVersion asks P2Pool for its version once per run of its unit (UI-09):
+// the XMRig API reports XMRig's version, P2Pool's Data API has none.
+func (m *Model) readP2PoolVersion() tea.Cmd {
+	if m.snap == nil || m.verReading {
+		return nil
+	}
+	inv := m.snap.Services.P2Pool.InvocationID
+	if inv == "" || inv == m.verFor {
+		return nil
+	}
+	m.verReading = true
+	run, unit := m.run, m.cfg.Services.P2Pool
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return p2poolVerMsg{inv, p2poolVersion(ctx, run, unit)}
+	}
+}
+
+var (
+	execPath     = regexp.MustCompile(`(?:^|[{ ])path=([^ ;]+)`)
+	p2poolBanner = regexp.MustCompile(`^P2Pool (v[0-9]+(?:\.[0-9]+){1,3})\b`)
+)
+
+// p2poolVersion runs the unit's ExecStart binary with --version, as install.sh does;
+// only a binary named p2pool, so a wrapper script is never started by mistake.
+func p2poolVersion(ctx context.Context, run systemd.Runner, unit string) string {
+	out, _, err := run(ctx, "systemctl", "show", "--no-pager", "--property=ExecStart", "--value", "--", unit)
+	if err != nil {
+		return ""
+	}
+	p := execPath.FindSubmatch(out)
+	if p == nil || filepath.Base(string(p[1])) != "p2pool" || !filepath.IsAbs(string(p[1])) {
+		return ""
+	}
+	out, _, _ = run(ctx, string(p[1]), "--version")
+	if v := p2poolBanner.FindSubmatch(out); v != nil {
+		return string(v[1])
+	}
+	return ""
 }
 
 func (m Model) nodeTick() tea.Cmd {
@@ -293,6 +346,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.collecting = false
 		m.prev, m.snap = m.snap, (*status.Snapshot)(msg)
 		m.record()
+		return m, (&m).readP2PoolVersion()
+	case p2poolVerMsg:
+		m.verReading, m.verFor, m.p2poolVer = false, msg.inv, msg.ver
 		return m, nil
 	case opMsg:
 		m.busy = false
@@ -320,12 +376,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case priceMsg:
 		m.pricing, m.priceErr = false, ""
-		if msg.err != nil {
-			m.priceErr = msg.err.Error() // keep the last good quote on screen
-		} else {
-			m.quote = msg.q
+		if len(m.rates) != len(msg) {
+			m.rates = make([]rate, len(msg))
 		}
-		return m, m.priceTick(msg.err != nil)
+		var fresh []*price.Quote
+		var why []string
+		for i, r := range msg {
+			if r.Err != nil {
+				m.rates[i].err = r.Err.Error() // keep its last quote, marked stale
+				why = append(why, m.rates[i].err)
+				continue
+			}
+			m.rates[i] = rate{q: r.Quote}
+			fresh = append(fresh, r.Quote)
+		}
+		if q := price.Median(fresh); q != nil {
+			m.quote = q
+		} else {
+			m.priceErr = strings.Join(why, "; ") // keep the last median on screen
+		}
+		return m, m.priceTick(m.priceErr != "")
 	case payoutsMsg:
 		m.paying, m.payErr = false, ""
 		if msg.err != nil {

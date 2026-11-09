@@ -1,5 +1,5 @@
 // Package price reads the XMR exchange rate in USD and EUR for the TUI
-// (spec PRICE-01..03). Public GETs, no key, no address or other identifying
+// (spec PRICE-01..03) from three providers. Public GETs, no key, no address or other identifying
 // data in the request; the rate is display-only.
 package price
 
@@ -12,7 +12,9 @@ import (
 	"math"
 	"net/http"
 	"net/url"
-	"strings"
+	"sort"
+	"strconv"
+	"sync"
 	"time"
 )
 
@@ -33,7 +35,7 @@ type answer struct {
 // must not pass for a fresh rate and hide the fallback or the stale mark.
 const MaxAge = time.Hour
 
-// CoinGecko is asked first.
+// CoinGecko is a price aggregator.
 var CoinGecko = Provider{"CoinGecko", "https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd,eur&include_last_updated_at=true",
 	func(r io.Reader) (answer, error) {
 		var b struct {
@@ -51,8 +53,7 @@ var CoinGecko = Provider{"CoinGecko", "https://api.coingecko.com/api/v3/simple/p
 		return a, err
 	}}
 
-// CoinPaprika is the fallback; it is one of the two providers of the official
-// Monero GUI wallet (the other, Kraken, is an exchange).
+// CoinPaprika is a price aggregator, the official Monero GUI wallet's alternative to Kraken.
 var CoinPaprika = Provider{"CoinPaprika", "https://api.coinpaprika.com/v1/tickers/xmr-monero?quotes=USD,EUR",
 	func(r io.Reader) (answer, error) {
 		var b struct {
@@ -65,8 +66,34 @@ var CoinPaprika = Provider{"CoinPaprika", "https://api.coinpaprika.com/v1/ticker
 		return answer{usd: b.Quotes["USD"].Price, eur: b.Quotes["EUR"].Price, updated: b.Updated}, err
 	}}
 
-// Providers in the order they are asked.
-var Providers = []Provider{CoinGecko, CoinPaprika}
+// Kraken is the exchange the official Monero GUI wallet asks by default; its ticker
+// gives the last trade ("c") and no update time.
+var Kraken = Provider{"Kraken", "https://api.kraken.com/0/public/Ticker?pair=XMRUSD,XMREUR",
+	func(r io.Reader) (answer, error) {
+		var b struct {
+			Error  []string `json:"error"`
+			Result map[string]struct {
+				C []string `json:"c"`
+			} `json:"result"`
+		}
+		if err := json.NewDecoder(r).Decode(&b); err != nil {
+			return answer{}, err
+		}
+		if len(b.Error) > 0 {
+			return answer{}, errors.New(b.Error[0])
+		}
+		last := func(pair string) float64 {
+			if c := b.Result[pair].C; len(c) > 0 {
+				v, _ := strconv.ParseFloat(c[0], 64)
+				return v
+			}
+			return 0
+		}
+		return answer{usd: last("XXMRZUSD"), eur: last("XXMRZEUR")}, nil
+	}}
+
+// Providers are all asked at once and shown side by side; the order is the screen's.
+var Providers = []Provider{CoinGecko, Kraken, CoinPaprika}
 
 // Timeout bounds one request. Over a VPN on a mobile uplink CoinGecko often takes
 // 3-5 s, so the node probes' short timeout is not used here.
@@ -79,23 +106,65 @@ type Quote struct {
 	At       time.Time // when Moneroid received it
 }
 
-// FetchAny asks the providers in order, each within Timeout, and returns the first
-// good answer; if all fail, the error lists each one's reason.
-func FetchAny(ctx context.Context, c *http.Client, ps []Provider, now func() time.Time) (*Quote, error) {
-	var why []string
-	for _, p := range ps {
-		pctx, cancel := context.WithTimeout(ctx, Timeout)
-		q, err := Fetch(pctx, c, p, now())
-		cancel()
-		if err == nil {
-			return q, nil
+// Result is one provider's answer within FetchAll.
+type Result struct {
+	Quote *Quote
+	Err   error
+}
+
+// FetchAll asks every provider at once, each within Timeout, and returns their
+// answers in the order of ps.
+func FetchAll(ctx context.Context, c *http.Client, ps []Provider, now func() time.Time) []Result {
+	out := make([]Result, len(ps))
+	var wg sync.WaitGroup
+	for i, p := range ps {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pctx, cancel := context.WithTimeout(ctx, Timeout)
+			defer cancel()
+			out[i].Quote, out[i].Err = Fetch(pctx, c, p, now())
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+// Median combines quotes per currency (the mean of the middle two for an even
+// count), so one provider that is off cannot move the rate much; nil without quotes.
+func Median(qs []*Quote) *Quote {
+	var usd, eur []float64
+	var at time.Time
+	for _, q := range qs {
+		if q == nil {
+			continue
 		}
-		why = append(why, err.Error())
-		if ctx.Err() != nil {
-			break
+		if q.USD != nil {
+			usd = append(usd, *q.USD)
+		}
+		if q.EUR != nil {
+			eur = append(eur, *q.EUR)
+		}
+		if q.At.After(at) {
+			at = q.At
 		}
 	}
-	return nil, errors.New(strings.Join(why, "; "))
+	if len(usd) == 0 && len(eur) == 0 {
+		return nil
+	}
+	return &Quote{USD: median(usd), EUR: median(eur), At: at}
+}
+
+func median(v []float64) *float64 {
+	if len(v) == 0 {
+		return nil
+	}
+	sort.Float64s(v)
+	m := v[len(v)/2]
+	if len(v)%2 == 0 {
+		m = (v[len(v)/2-1] + m) / 2
+	}
+	return &m
 }
 
 // Fetch asks p once.

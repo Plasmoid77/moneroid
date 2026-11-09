@@ -198,7 +198,6 @@ func (c *Collector) applyP2Pool(s *Snapshot, files map[string]p2pool.File, now t
 		m.P2PConnections = r.Int("connections")
 		m.P2PIncomingConnections = r.Int("incoming_connections")
 		m.PeerListSize = r.Int("peer_list_size")
-		m.Peers = peers(o)
 		m.PeerHeights = peerHeights(o)
 		m.PeerMaxHeight = maxHeight(m.PeerHeights)
 		m.UptimeSeconds = r.Int("uptime")
@@ -332,34 +331,6 @@ func peerHeights(o jsonx.Object) []int64 {
 		}
 	}
 	return hs
-}
-
-// peers reads `local/p2p` peer strings: direction, connected seconds, ping ms
-// (-1 = not measured yet), software, announced height, address (P2Pool
-// p2p_server.cpp, v4.18.1). Unparseable entries are skipped.
-func peers(o jsonx.Object) []Peer {
-	v, _ := o["peers"].([]any)
-	var ps []Peer
-	for _, e := range v {
-		s, _ := e.(string)
-		f := strings.Split(s, ",")
-		n := len(f)
-		if n < 6 || (f[0] != "I" && f[0] != "O") {
-			continue
-		}
-		up, err1 := strconv.ParseInt(f[1], 10, 64)
-		ping, err2 := strconv.ParseInt(f[2], 10, 64)
-		h, err3 := strconv.ParseInt(f[n-2], 10, 64)
-		if err1 != nil || err2 != nil || err3 != nil {
-			continue
-		}
-		p := Peer{Incoming: f[0] == "I", UptimeS: up, Software: sanitize(strings.Join(f[3:n-2], ",")), Height: h, Addr: sanitize(f[n-1])}
-		if ping >= 0 {
-			p.PingMs = &ping
-		}
-		ps = append(ps, p)
-	}
-	return ps
 }
 
 func maxHeight(hs []int64) *int64 {

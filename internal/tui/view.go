@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -79,7 +81,7 @@ func (m Model) render() string {
 	fmt.Fprintf(&b, "  %s\n", m.sparkline(w-40))
 
 	p := s.P2Pool
-	fmt.Fprintf(&b, "\n  %s   p2p %s conn (%s in)   zmq %s s ago   %s\n", ansi.Orange("P2POOL"), i64(p.P2PConnections), i64(p.P2PIncomingConnections), f0(p.ZMQAgeSeconds), age(s, status.SrcP2PoolP2P))
+	fmt.Fprintf(&b, "\n  %s%s   p2p %s conn (%s in)   zmq %s s ago   %s\n", ansi.Orange("P2POOL"), m.p2poolVerText(), i64(p.P2PConnections), i64(p.P2PIncomingConnections), f0(p.ZMQAgeSeconds), age(s, status.SrcP2PoolP2P))
 	fmt.Fprintf(&b, "  stratum %s H/s (15m)  shares %s  sidechain %s found / %s failed  %s\n", ansi.White(f0(p.Hashrate15m)), i64(p.StratumShares), ansi.White(i64(p.SidechainSharesFound)), i64(p.SidechainSharesFailed), age(s, status.SrcP2PoolStratum))
 	sync := "peers —"
 	if p.SidechainHeight != nil && p.PeerMaxHeight != nil && *p.PeerMaxHeight > 0 {
@@ -96,11 +98,11 @@ func (m Model) render() string {
 	}
 
 	fmt.Fprintf(&b, "\n  %s   %s\n", ansi.Orange("EARNINGS"), m.priceLine())
-	fmt.Fprintf(&b, "  %s   %s\n", ansi.Orange("paid    "), m.payoutsLine())
-	fmt.Fprintf(&b, "  %s   %s\n", ansi.Orange("expected"), m.expectedLine(s))
+	var r strings.Builder // after the rates line, which gets only the rows left over
+	fmt.Fprintf(&r, "  %s   %s\n", ansi.Orange("paid    "), m.payoutsLine())
+	fmt.Fprintf(&r, "  %s   %s\n", ansi.Orange("expected"), m.expectedLine(s))
 
-	// The tail (warnings, issues, dialogs) always shows; the peers table gets the rows left over.
-	var t strings.Builder
+	var t strings.Builder // the tail: warnings, issues, dialogs
 	if m.prev != nil && m.prev.XMRig.Rejected != nil && x.Rejected != nil && *x.Rejected > *m.prev.XMRig.Rejected {
 		t.WriteString("\n  " + ansi.Red("warning: rejected submissions increased since the previous sample") + "\n") // H-04
 	}
@@ -123,12 +125,20 @@ func (m Model) render() string {
 	if d := m.dialog(); d != "" {
 		t.WriteString("\n" + d)
 	}
-	room := len(p.Peers) + 3 // unknown height (tests): every peer
-	if m.height > 0 {
-		room = m.height - 1 - strings.Count(b.String(), "\n") - strings.Count(t.String(), "\n")
+	if m.priceHTTP != nil {
+		rates := strings.Split(m.ratesLine(w-13), "\n")
+		if m.height > 0 { // the tail must stay visible: drop the rates rows that do not fit
+			free := m.height - 1 - strings.Count(b.String()+r.String()+t.String(), "\n")
+			if free < 0 {
+				free = 0
+			}
+			rates = rates[:min(len(rates), free)]
+		}
+		if len(rates) > 0 {
+			fmt.Fprintf(&b, "  %s   %s\n", ansi.Orange("rates   "), strings.Join(rates, "\n"))
+		}
 	}
-	b.WriteString(peersBlock(p.Peers, room))
-	return m.fit(b.String()+t.String(), w)
+	return m.fit(b.String()+r.String()+t.String(), w)
 }
 
 // nodeLine is the ping of the Monero node P2Pool uses (UI-08); "" when P2Pool's config is unknown.
@@ -158,57 +168,6 @@ func (m Model) nodeLine() string {
 		ping += fmt.Sprintf(" (median %d ms of the last %d)", ms[k/2], k)
 	}
 	return fmt.Sprintf("node   %s   ping %s   %s   height %s   %s", addr, ping, sync, i64(n.r.Height), checked)
-}
-
-// peersBlock lists the connected P2Pool peers by ping in at most room lines (UI-08).
-func peersBlock(peers []status.Peer, room int) string {
-	if len(peers) == 0 || room < 2 {
-		return ""
-	}
-	ps := append([]status.Peer(nil), peers...)
-	sort.SliceStable(ps, func(i, j int) bool {
-		a, b := ps[i].PingMs, ps[j].PingMs
-		if a == nil || b == nil {
-			return a != nil
-		}
-		return *a < *b
-	})
-	var pings []int64
-	width := len("ADDRESS")
-	for _, p := range ps {
-		if p.PingMs != nil {
-			pings = append(pings, *p.PingMs)
-		}
-		width = max(width, len(p.Addr))
-	}
-	title := fmt.Sprintf("%d connected", len(ps))
-	if len(pings) > 0 { // ps is sorted, so pings are too
-		title = fmt.Sprintf("ping min %d · median %d · max %d ms   %s", pings[0], pings[len(pings)/2], pings[len(pings)-1], title)
-	}
-	rows := min(len(ps), room-3)
-	if rows > 0 && rows < len(ps) {
-		title += fmt.Sprintf(", the %d fastest shown", rows)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "\n  %s   %s\n", ansi.Orange("PEERS"), title)
-	if rows <= 0 {
-		return b.String()
-	}
-	fmt.Fprintf(&b, "    %s\n", ansi.Orange(fmt.Sprintf("%-*s %8s  %-9s %-4s %s", width, "ADDRESS", "PING", "CONNECTED", "DIR", "SOFTWARE")))
-	for _, p := range ps[:rows] {
-		ping, dir, sw := "—", "out", p.Software
-		if p.PingMs != nil {
-			ping = fmt.Sprintf("%d ms", *p.PingMs)
-		}
-		if p.Incoming {
-			dir = "in"
-		}
-		if sw == "" {
-			sw = "—"
-		}
-		fmt.Fprintf(&b, "    %-*s %s  %-9s %-4s %s\n", width, p.Addr, ansi.White(fmt.Sprintf("%8s", ping)), dur(fp(float64(p.UptimeS))), dir, sw)
-	}
-	return b.String()
 }
 
 // fit pads or trims the body so the key bar sits on the last terminal row
@@ -258,14 +217,68 @@ func (m Model) priceLine() string {
 	case q == nil && m.priceErr != "":
 		return "1 XMR = ?   price unavailable: " + m.priceErr
 	case q == nil:
-		return "1 XMR = …   asking " + price.Providers[0].Name
+		return "1 XMR = …   asking the rate sources"
 	}
 	stale := ""
 	if m.priceErr != "" {
-		stale = "   " + ansi.Red("stale: "+m.priceErr)
+		stale = "   " + ansi.Red("stale: no source answers")
 	}
-	return fmt.Sprintf("1 XMR = %s   %s, %s ago%s", m.fiat(1, true), q.Source, ago(q.At), stale)
+	return fmt.Sprintf("1 XMR = %s   median, %s ago%s", m.fiat(1, true), ago(q.At), stale)
 }
+
+// p2poolVerText is " v4.18.1" after the P2POOL header, like XMRig's version; "" when unknown.
+func (m Model) p2poolVerText() string {
+	if m.p2poolVer == "" {
+		return ""
+	}
+	return " " + m.p2poolVer
+}
+
+// ratesLine shows each provider side by side (PRICE-01): its rate, its rate marked
+// stale when the last request failed, or the reason when it never answered. Providers
+// that do not fit in width go on the next lines, under the first.
+func (m Model) ratesLine(width int) string {
+	var parts []string
+	for i, p := range price.Providers {
+		var r rate
+		if i < len(m.rates) {
+			r = m.rates[i]
+		}
+		why := strings.TrimPrefix(r.err, p.Name+": ")
+		switch {
+		case r.q != nil && r.err != "":
+			parts = append(parts, fmt.Sprintf("%s %s %s", p.Name, fiatOf(1, r.q, false), ansi.Red("stale: "+why)))
+		case r.q != nil:
+			parts = append(parts, fmt.Sprintf("%s %s", p.Name, fiatOf(1, r.q, false)))
+		case r.err != "":
+			parts = append(parts, fmt.Sprintf("%s %s", p.Name, ansi.Red(why)))
+		default:
+			parts = append(parts, p.Name+" …")
+		}
+	}
+	var b strings.Builder
+	n := 0
+	for _, p := range parts {
+		w := visible(p)
+		switch {
+		case n == 0:
+		case n+3+w > width:
+			b.WriteString("\n" + strings.Repeat(" ", 13))
+			n = 0
+		default:
+			b.WriteString("   ")
+			n += 3
+		}
+		b.WriteString(p)
+		n += w
+	}
+	return b.String()
+}
+
+var sgr = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// visible is the width of s on screen: runes without colour codes.
+func visible(s string) int { return utf8.RuneCountInString(sgr.ReplaceAllString(s, "")) }
 
 // expectedLine is the long-run expectation for the current hashrate: P2Pool pays the
 // same on average as solo mining, only smoother (PRICE-03).
@@ -285,15 +298,18 @@ func (m Model) expectedLine(s *status.Snapshot) string {
 }
 
 // fiat formats xmr in the quoted currencies, "$1.49 · €1.29"; "" without a quote.
-func (m Model) fiat(xmr float64, white bool) string {
-	if m.quote == nil {
+func (m Model) fiat(xmr float64, white bool) string { return fiatOf(xmr, m.quote, white) }
+
+// fiatOf formats xmr at quote q; "" without one.
+func fiatOf(xmr float64, q *price.Quote, white bool) string {
+	if q == nil {
 		return ""
 	}
 	var parts []string
 	for _, c := range []struct {
 		sym  string
 		rate *float64
-	}{{"$", m.quote.USD}, {"€", m.quote.EUR}} {
+	}{{"$", q.USD}, {"€", q.EUR}} {
 		if c.rate != nil {
 			v := fmt.Sprintf("%s%.2f", c.sym, xmr**c.rate)
 			if white {

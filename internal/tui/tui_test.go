@@ -1,8 +1,8 @@
 package tui
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -15,6 +15,7 @@ import (
 	"github.com/Plasmoid77/moneroid/internal/payouts"
 	"github.com/Plasmoid77/moneroid/internal/price"
 	"github.com/Plasmoid77/moneroid/internal/status"
+	"github.com/Plasmoid77/moneroid/internal/systemd"
 )
 
 func model() Model {
@@ -143,7 +144,8 @@ func TestRenderDashboardFillsScreen(t *testing.T) {
 	m.record()
 	m.pay = &payouts.Report{Payouts: []payouts.Payout{{At: time.Now(), XMR: "0.000411000000", AtomicUnits: 411000000, Block: 1}}, TotalXMR: "0.000411000000", TotalAtomicUnits: 411000000, BlocksWithout: 12}
 	s.P2Pool.NetworkDifficulty, s.P2Pool.NetworkReward = f(821571146720), n(605805580000)
-	m.priceHTTP, m.quote = &http.Client{}, &price.Quote{USD: f(599.02), EUR: f(517.4), Source: "CoinPaprika", At: time.Now()}
+	m.priceHTTP, m.quote = &http.Client{}, &price.Quote{USD: f(599.02), EUR: f(517.4), At: time.Now()}
+	m.rates = []rate{{q: &price.Quote{USD: f(598.5), EUR: f(517)}}, {err: "Kraken: no answer in time"}, {}}
 	raw := m.View().Content
 	if !strings.Contains(raw, "\x1b[38;2;255;102;0m") {
 		t.Fatal("dashboard must carry Monero orange")
@@ -153,7 +155,7 @@ func TestRenderDashboardFillsScreen(t *testing.T) {
 		t.Fatalf("dashboard must fill %d rows, got %d", m.height, got)
 	}
 	for _, want := range []string{"moneroid test", "health OK", "14402", "1 payouts", "0.000411000000", "12 pool blocks", "0.175", "12345680", "active/running",
-		"1 XMR = $599.02 · €517.40   CoinPaprika,", "≈ $0.25 · €0.21", "0.000915 XMR/day ≈ $0.55 · €0.47", "XMR/month ≈ $16.43 · €14.20"} {
+		"1 XMR = $599.02 · €517.40   median,", "rates      CoinGecko $598.50 · €517.00   Kraken no answer in time   CoinPaprika …", "≈ $0.25 · €0.21", "0.000915 XMR/day ≈ $0.55 · €0.47", "XMR/month ≈ $16.43 · €14.20"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("dashboard lacks %q:\n%s", want, v)
 		}
@@ -210,37 +212,19 @@ func (testErr) Error() string { return "boom" }
 
 var errTest = testErr{}
 
-func TestPeersAndNodePing(t *testing.T) {
+func TestNodePing(t *testing.T) {
 	n := func(v int64) *int64 { return &v }
 	b := func(v bool) *bool { return &v }
 	m := model()
 	m.cfg.P2Pool.ParamsFile = "/etc/moneroid/p2pool.conf"
 	s := &status.Snapshot{CollectedAt: time.Now(), Sources: map[string]status.Source{}}
 	s.Health.Level = "ok"
-	s.Health.Issues = []status.Issue{{Severity: "warn", Code: "SOME_ISSUE", Message: "must stay visible"}}
-	for i := 0; i < 12; i++ {
-		s.P2Pool.Peers = append(s.P2Pool.Peers, status.Peer{UptimeS: 125, PingMs: n(int64(300 - i*20)), Software: "P2Pool v4.18.1", Addr: fmt.Sprintf("192.0.2.%d:37888", i)})
-	}
-	s.P2Pool.Peers = append(s.P2Pool.Peers, status.Peer{Incoming: true, Addr: "[2001:db8::1]:37888"})
 	m.snap = s
 	m.node = &nodePing{r: node.Result{Candidate: node.Candidate{Host: "198.51.100.7", RPC: 18089}, LatencyMs: n(166), Synchronized: b(true), Height: n(3500000)}, at: time.Now()}
 	strip := func(v string) string { return regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(v, "") }
-
-	m.width, m.height = 0, 0 // size unknown: every peer
 	v := strip(m.View().Content)
-	for _, want := range []string{"node   198.51.100.7:18089   ping 166 ms   synchronized   height 3500000", "PEERS", "ping min 80 · median 200 · max 300 ms   13 connected", "192.0.2.11:37888       80 ms  2m 05s    out  P2Pool v4.18.1", "[2001:db8::1]:37888        —", "SOME_ISSUE"} {
-		if !strings.Contains(v, want) {
-			t.Fatalf("lacks %q:\n%s", want, v)
-		}
-	}
-	if strings.Index(v, "192.0.2.11:") > strings.Index(v, "192.0.2.0:") || strings.Index(v, "192.0.2.0:") > strings.Index(v, "[2001:db8::1]") {
-		t.Fatalf("peers must be sorted by ping, unmeasured last:\n%s", v)
-	}
-
-	m.width, m.height = 120, 34 // a few rows to spare: the fastest peers, the issues untouched
-	v = strip(m.View().Content)
-	if !strings.Contains(v, "fastest shown") || !strings.Contains(v, "192.0.2.11:") || strings.Contains(v, "[2001:db8::1]") || !strings.Contains(v, "SOME_ISSUE") || len(strings.Split(v, "\n")) != 34 {
-		t.Fatalf("height 34:\n%s", v)
+	if !strings.Contains(v, "node   198.51.100.7:18089   ping 166 ms   synchronized   height 3500000") || strings.Contains(v, "PEERS") {
+		t.Fatalf("node line, no peers table:\n%s", v)
 	}
 
 	for _, ms := range []int64{180, 175, 2192} {
@@ -256,21 +240,101 @@ func TestPeersAndNodePing(t *testing.T) {
 	}
 }
 
-// The rate gets its own timeout (CoinGecko over a VPN on LTE takes 3-5 s) and a quick
-// retry after a failure instead of the 10-minute wait.
-func TestPriceTimeoutAndRetry(t *testing.T) {
+// The rate gets its own timeout (CoinGecko over a VPN on LTE takes 3-5 s), all three
+// sources are shown, the median is used, and a quick retry follows when none answered.
+func TestPriceSources(t *testing.T) {
 	if c := priceClient(&config.Config{}); c.Timeout != price.Timeout || price.Timeout <= node.ProbeTimeout {
 		t.Fatalf("price client timeout %v, want %v", c.Timeout, price.Timeout)
 	}
 	if priceWait(true) != priceRetry || priceWait(false) != priceEvery || priceRetry >= priceEvery {
 		t.Fatalf("waits: failed %v, ok %v", priceWait(true), priceWait(false))
 	}
+	q := func(usd, eur float64) *price.Quote { return &price.Quote{USD: &usd, EUR: &eur, At: time.Now()} }
+	plain := func(s string) string { return regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(s, "") }
+
 	m := Model{priceHTTP: &http.Client{}, pricing: true}
-	r, cmd := m.Update(priceMsg{err: errors.New("CoinGecko: no answer in time")})
-	if mm := r.(Model); mm.pricing || cmd == nil || !strings.Contains(mm.priceLine(), "price unavailable: CoinGecko: no answer in time") {
-		t.Fatalf("after a failure: pricing %v, next %v, line %q", mm.pricing, cmd != nil, mm.priceLine())
+	r, cmd := m.Update(priceMsg{{Err: errors.New("CoinGecko: no answer in time")}, {Err: errors.New("Kraken: HTTP 503")}, {Err: errors.New("CoinPaprika: HTTP 429")}})
+	m = r.(Model)
+	if m.pricing || cmd == nil || m.priceErr == "" || !strings.Contains(m.priceLine(), "price unavailable: CoinGecko: no answer in time; Kraken: HTTP 503; CoinPaprika: HTTP 429") {
+		t.Fatalf("none answered: pricing %v, next %v, line %q", m.pricing, cmd != nil, m.priceLine())
 	}
-	if _, cmd := (Model{}).Update(priceMsg{err: errors.New("x")}); cmd != nil {
+
+	r, _ = m.Update(priceMsg{{Err: errors.New("CoinGecko: no answer in time")}, {Quote: q(594.3, 528.58)}, {Quote: q(592.7, 528.18)}})
+	m = r.(Model)
+	if m.priceErr != "" || !strings.Contains(plain(m.priceLine()), "1 XMR = $593.50 · €528.38   median, 0s ago") ||
+		plain(m.ratesLine(200)) != "CoinGecko no answer in time   Kraken $594.30 · €528.58   CoinPaprika $592.70 · €528.18" {
+		t.Fatalf("two answered:\n%q\n%q", plain(m.priceLine()), plain(m.ratesLine(200)))
+	}
+
+	r, cmd = m.Update(priceMsg{{Err: errors.New("CoinGecko: HTTP 429")}, {Err: errors.New("Kraken: HTTP 503")}, {Err: errors.New("CoinPaprika: HTTP 429")}})
+	m = r.(Model)
+	if cmd == nil || !strings.Contains(plain(m.priceLine()), "$593.50 · €528.38   median, 0s ago   stale: no source answers") ||
+		plain(m.ratesLine(200)) != "CoinGecko HTTP 429   Kraken $594.30 · €528.58 stale: HTTP 503   CoinPaprika $592.70 · €528.18 stale: HTTP 429" {
+		t.Fatalf("stale:\n%q\n%q", plain(m.priceLine()), plain(m.ratesLine(200)))
+	}
+	// At 80 columns (67 after the label) the providers that do not fit move under the first.
+	if got := plain(m.ratesLine(80 - 13)); got != "CoinGecko HTTP 429   Kraken $594.30 · €528.58 stale: HTTP 503\n             CoinPaprika $592.70 · €528.18 stale: HTTP 429" {
+		t.Fatalf("wrapped:\n%s", got)
+	}
+	// 80×24 with a warning: the rates take only the free rows, the issue and the footer stay.
+	d := model()
+	d.width, d.height, d.priceHTTP, d.rates, d.quote = 80, 24, m.priceHTTP, m.rates, m.quote
+	ds := &status.Snapshot{CollectedAt: time.Now(), Sources: map[string]status.Source{}}
+	ds.Health.Level = "warn"
+	ds.Health.Issues = []status.Issue{{Severity: "warn", Code: "SOME_ISSUE", Message: "must stay visible"}}
+	d.snap = ds
+	v := plain(d.View().Content)
+	if !strings.Contains(v, "SOME_ISSUE") || !strings.Contains(v, "expected") || !strings.Contains(v, "q quit") || len(strings.Split(v, "\n")) != 24 {
+		t.Fatalf("80x24:\n%s", v)
+	}
+	if _, cmd := (Model{}).Update(priceMsg{{Err: errors.New("x")}}); cmd != nil {
 		t.Fatal("price off must not schedule requests")
+	}
+}
+
+// P2Pool's version comes from its unit's binary, once per run, never from a wrapper (UI-09).
+func TestP2PoolVersion(t *testing.T) {
+	var calls []string
+	fake := func(exec string) systemd.Runner {
+		return func(_ context.Context, name string, args ...string) ([]byte, []byte, error) {
+			calls = append(calls, name+" "+strings.Join(args, " "))
+			if name == "systemctl" {
+				return []byte("{ path=" + exec + " ; argv[]=" + exec + " --params-file /etc/moneroid/p2pool.conf ; ignore_errors=no ; pid=614359 }\n"), nil, nil
+			}
+			return []byte("P2Pool v4.18.1 (built with clang/22.1.8_p2pool from abc8335 on 2026-09-22)\n\nDependencies:\n"), nil, nil
+		}
+	}
+	if v := p2poolVersion(context.Background(), fake("/usr/local/bin/p2pool"), "p.service"); v != "v4.18.1" {
+		t.Fatalf("version %q, calls %q", v, calls)
+	}
+	if calls[0] != "systemctl show --no-pager --property=ExecStart --value -- p.service" || calls[1] != "/usr/local/bin/p2pool --version" {
+		t.Fatalf("calls %q", calls)
+	}
+	for _, exec := range []string{"/usr/local/bin/start-p2pool.sh", "/usr/bin/env", "p2pool"} {
+		calls = nil
+		if v := p2poolVersion(context.Background(), fake(exec), "p.service"); v != "" || len(calls) != 1 {
+			t.Fatalf("%s: version %q, calls %q", exec, v, calls)
+		}
+	}
+
+	m := model()
+	m.run = fake("/usr/local/bin/p2pool")
+	s := &status.Snapshot{CollectedAt: time.Now(), Sources: map[string]status.Source{}}
+	s.Services.P2Pool.InvocationID = "inv1"
+	r, cmd := m.Update(snapshotMsg(s))
+	if cmd == nil {
+		t.Fatal("first snapshot of a run must read the version")
+	}
+	r, _ = r.(Model).Update(cmd())
+	if _, cmd := r.(Model).Update(snapshotMsg(s)); cmd != nil {
+		t.Fatal("same run: no second read")
+	}
+	if v := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(r.(Model).View().Content, ""); !strings.Contains(v, "P2POOL v4.18.1   p2p") {
+		t.Fatalf("dashboard lacks the P2Pool version:\n%s", v)
+	}
+	s2 := *s
+	s2.Services.P2Pool.InvocationID = "inv2"
+	if _, cmd := r.(Model).Update(snapshotMsg(&s2)); cmd == nil {
+		t.Fatal("a restarted P2Pool must be asked again")
 	}
 }

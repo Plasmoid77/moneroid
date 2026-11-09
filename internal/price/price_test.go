@@ -26,6 +26,9 @@ func TestFetch(t *testing.T) {
 		"paprika fresh":    {200, `{"last_updated":"2026-11-09T01:30:00Z","quotes":{"USD":{"price":594.3}}}`, 594.3, 0, false, CoinPaprika},
 		"paprika stale":    {200, `{"last_updated":"2026-11-08T22:00:00Z","quotes":{"USD":{"price":594.3}}}`, 0, 0, true, CoinPaprika},
 		"paprika bad time": {200, `{"last_updated":"yesterday","quotes":{"USD":{"price":594.3}}}`, 0, 0, true, CoinPaprika},
+		"kraken":           {200, `{"error":[],"result":{"XXMRZEUR":{"a":["530.09","2","2.000"],"c":["528.58","0.45"]},"XXMRZUSD":{"c":["594.30","0.1"]}}}`, 594.3, 528.58, false, Kraken},
+		"kraken error":     {200, `{"error":["EQuery:Unknown asset pair"]}`, 0, 0, true, Kraken},
+		"kraken garbage":   {200, `{"error":[],"result":{"XXMRZUSD":{"c":["n/a"]}}}`, 0, 0, true, Kraken},
 		"paprika empty":    {200, `{"error":"id not found"}`, 0, 0, true, CoinPaprika},
 		"usd only":         {200, `{"monero":{"usd":599.02}}`, 599.02, 0, false, CoinGecko},
 		"negative":         {200, `{"monero":{"usd":-1,"eur":0}}`, 0, 0, true, CoinGecko},
@@ -75,8 +78,8 @@ func TestFetchErrors(t *testing.T) {
 	}
 }
 
-// The fallback answers when the first provider fails; with both down, both reasons show.
-func TestFetchAny(t *testing.T) {
+// All providers are asked; each answer stays in its place, a failure does not hide the others.
+func TestFetchAll(t *testing.T) {
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(429) }))
 	defer down.Close()
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -85,16 +88,26 @@ func TestFetchAny(t *testing.T) {
 	defer up.Close()
 	g, p := CoinGecko, CoinPaprika
 	g.URL, p.URL = down.URL, up.URL
-	q, err := FetchAny(context.Background(), &http.Client{}, []Provider{g, p}, time.Now)
-	if err != nil || q.Source != "CoinPaprika" || *q.USD != 594.3 {
-		t.Fatalf("fallback: %+v %v", q, err)
+	r := FetchAll(context.Background(), &http.Client{}, []Provider{g, p}, time.Now)
+	if len(r) != 2 || r[0].Err == nil || r[0].Err.Error() != "CoinGecko: HTTP 429" || r[1].Err != nil || r[1].Quote.Source != "CoinPaprika" || *r[1].Quote.USD != 594.3 {
+		t.Fatalf("results: %+v", r)
 	}
-	p.URL = down.URL
-	if _, err := FetchAny(context.Background(), &http.Client{}, []Provider{g, p}, time.Now); err == nil || err.Error() != "CoinGecko: HTTP 429; CoinPaprika: HTTP 429" {
-		t.Fatalf("both down: %v", err)
+	if len(Providers) != 3 || Providers[0].Name != "CoinGecko" || Providers[1].Name != "Kraken" || Providers[2].Name != "CoinPaprika" {
+		t.Fatal("CoinGecko, Kraken, CoinPaprika")
 	}
-	if len(Providers) != 2 || Providers[0].Name != "CoinGecko" || Providers[1].Name != "CoinPaprika" {
-		t.Fatal("CoinGecko first, CoinPaprika as the fallback")
+}
+
+func TestMedian(t *testing.T) {
+	t0 := time.Unix(1794188828, 0)
+	q := func(usd, eur float64, at time.Time) *Quote {
+		return &Quote{USD: positive(usd), EUR: positive(eur), At: at}
+	}
+	m := Median([]*Quote{q(592.95, 528.29, t0), q(594.3, 0, t0.Add(time.Second)), nil, q(592.71, 528.17, t0)})
+	if !eq(m.USD, 592.95) || !eq(m.EUR, 528.23) || !m.At.Equal(t0.Add(time.Second)) {
+		t.Fatalf("median: %v %v %v", *m.USD, *m.EUR, m.At)
+	}
+	if Median([]*Quote{nil}) != nil || Median(nil) != nil {
+		t.Fatal("no quotes, no median")
 	}
 }
 

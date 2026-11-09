@@ -105,7 +105,6 @@ type P2PoolMetrics struct {
 	PeerListSize           *int64     `json:"peer_list_size"`
 	PeerMaxHeight          *int64     `json:"peer_max_height"` // highest sidechain height reported by connected peers
 	PeerHeights            []int64    `json:"-"`               // every reported peer height, for the guard
-	Peers                  []Peer     `json:"-"`               // connected peers, for the TUI
 	UptimeSeconds          *int64     `json:"uptime_seconds"`
 	ZMQAgeAtWriteSeconds   *int64     `json:"zmq_age_at_write_seconds"`
 	ZMQAgeSeconds          *float64   `json:"zmq_age_seconds"`
@@ -165,14 +164,4 @@ func (s *Snapshot) HasIssue(code string) bool {
 		}
 	}
 	return false
-}
-
-// Peer is one connected P2Pool peer from `local/p2p`.
-type Peer struct {
-	Incoming bool
-	UptimeS  int64  // seconds since the connection was made
-	PingMs   *int64 // nil until P2Pool has measured it (-1 upstream)
-	Software string // "P2Pool v4.18.1"; empty when the peer has not said
-	Height   int64  // highest sidechain height it announced
-	Addr     string
 }
