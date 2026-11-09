@@ -29,11 +29,11 @@ func TestFont(t *testing.T) {
 	if got := KernelFont.Safe("€14.20 — loading… ≈ $1 · ░"); got != "EUR 14.20 - loading... ≈ $1 · ░" {
 		t.Fatalf("KernelFont.Safe = %q", got)
 	}
-	lat15 := NewFont("€—–…·≈←↑→↓§░▒█") // Debian console-setup Lat15-Fixed16
+	lat15 := NewFont("€—–…·≈←↑→↓§░▒█─¯") // Debian console-setup Lat15-Fixed16
 	if got := lat15.Safe("€1 ▓ ✓"); got != "€1 # ?" {
 		t.Fatalf("lat15.Safe = %q", got)
 	}
-	for f, want := range map[*Font]string{{}: "▁▂▃▄▅▆▇█", &KernelFont: "░░▒▒▓▓██", &lat15: "░░░▒▒▒██", {set: map[rune]bool{}}: ".:-=+*#@"} {
+	for f, want := range map[*Font]string{{}: "▁▂▃▄▅▆▇█", &KernelFont: "___───▀▀", &lat15: "___───¯¯", {set: map[rune]bool{}}: "___---^^"} {
 		if got := string(f.Ramp()); got != want {
 			t.Fatalf("ramp %q, want %q", got, want)
 		}

@@ -163,7 +163,7 @@ func TestRenderDashboardFillsScreen(t *testing.T) {
 	for _, c := range []struct {
 		font ansi.Font
 		eur  string
-	}{{ansi.KernelFont, "EUR 0.21"}, {ansi.NewFont("€—–…·≈←↑→↓§░▒█"), "€0.21"}} {
+	}{{ansi.KernelFont, "EUR 0.21"}, {ansi.NewFont("€—–…·≈←↑→↓§░▒█─¯"), "€0.21"}} {
 		m.font = c.font
 		for _, md := range []mode{modeDashboard, modePayouts} {
 			m.mode = md
