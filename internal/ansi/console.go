@@ -26,7 +26,7 @@ func NewFont(chars string) Font {
 
 // KernelFont is what Moneroid needs from the kernel's built-in CP437 font, the
 // console's font when console-setup/setfont never loaded another one.
-var KernelFont = NewFont("·≈←↑→↓§░▒▓█▄")
+var KernelFont = NewFont("·≈←↑→↓§░▒▓█▄─▀")
 
 // Has reports whether f draws r.
 func (f Font) Has(r rune) bool { return f.set == nil || r < 0x7f || f.set[r] }
@@ -56,26 +56,23 @@ func (f Font) Safe(s string) string {
 	return b.String()
 }
 
-// Ramp is the 8-step sparkline ramp f draws best: eighth blocks, else the
-// shades it has stretched over 8 steps, else ASCII.
+// Ramp is the 8-step sparkline ramp f draws best: eighth blocks, else a thin
+// trace of glyphs at three heights (_ ─ ¯). Solid shades are avoided: console
+// fonts have no gap between rows, so they merged with a full meter above.
 func (f Font) Ramp() []rune {
 	if eighths := []rune("▁▂▃▄▅▆▇█"); f.all(eighths) {
 		return eighths
 	}
-	var shades []rune
-	for _, r := range "░▒▓█" {
-		if f.Has(r) {
-			shades = append(shades, r)
-		}
+	mid, top := '-', '^'
+	if f.Has('─') {
+		mid = '─'
 	}
-	if len(shades) < 2 {
-		return []rune(".:-=+*#@")
+	if f.Has('¯') {
+		top = '¯'
+	} else if f.Has('▀') {
+		top = '▀'
 	}
-	ramp := make([]rune, 8)
-	for i := range ramp {
-		ramp[i] = shades[i*len(shades)/8]
-	}
-	return ramp
+	return []rune{'_', '_', '_', mid, mid, mid, top, top}
 }
 
 func (f Font) all(rs []rune) bool {

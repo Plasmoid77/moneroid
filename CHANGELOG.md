@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.5 — 2026-11-09
+
+- TUI: the 10-minute sparkline is scaled to its own range (at least the top 10 %), so a steady hashrate shows its variation instead of a flat bar at the top; the label gives the scale (`13055–14506 H/s`). On a console font without eighth blocks it is a thin trace of `_ ─ ¯` rather than solid shades, which merged with the full hugepages meter above; a blank line separates the two when the terminal is at least 30 rows high.
+
 ## v0.5.4 — 2026-11-09
 
 - Linux console: instead of a fixed CP437 list, the TUI and `status` ask the kernel which characters the loaded console font has (`GIO_UNIMAP`) and replace only the missing ones. With console-setup installed (Debian's default Lat15 font) `€`, `—` and `…` show as they are; v0.5.3 also put `▓` into the sparkline, which Lat15 lacks.

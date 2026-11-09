@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -69,6 +70,9 @@ func (m Model) render() string {
 		hp = *x.HugepagesPercent / 100
 	}
 	fmt.Fprintf(&b, "  hugepages %5s%%  [%s]\n", f0(x.HugepagesPercent), ansi.Bar(bw, hp, m.ascii))
+	if m.height == 0 || m.height >= minHeight+6 { // room to spare: keep the trace off the meter above
+		b.WriteString("\n")
+	}
 	fmt.Fprintf(&b, "  %s\n", m.sparkline(w-40))
 
 	p := s.P2Pool
@@ -335,12 +339,15 @@ func (m Model) sparkline(width int) string {
 	if len(pts) > width {
 		pts = pts[len(pts)-width:]
 	}
-	max := 0.0
+	// Scaled to the window's own range, so a steady hashrate is not a flat bar at
+	// the top; at least the top 10 %, so the 10 s noise does not fill the scale.
+	hi, lo := 0.0, math.Inf(1)
 	for _, p := range pts {
-		if p.v != nil && *p.v > max {
-			max = *p.v
+		if p.v != nil {
+			hi, lo = math.Max(hi, *p.v), math.Min(lo, *p.v)
 		}
 	}
+	lo = math.Max(0, math.Min(lo, 0.9*hi))
 	var b, g strings.Builder
 	for _, p := range pts {
 		switch {
@@ -349,12 +356,15 @@ func (m Model) sparkline(width int) string {
 		case *p.v == 0:
 			g.WriteRune('_')
 		default:
-			i := int(*p.v / max * float64(len(ramp)-1))
+			i := len(ramp) - 1
+			if hi > lo {
+				i = int((*p.v - lo) / (hi - lo) * float64(len(ramp)-1))
+			}
 			g.WriteRune(ramp[i])
 		}
 	}
 	b.WriteString("10 min [" + ansi.Orange(g.String()) + strings.Repeat(" ", width-len(pts)))
-	fmt.Fprintf(&b, "] max %.0f H/s, %d samples", max, len(pts))
+	fmt.Fprintf(&b, "] %.0f–%.0f H/s, %d samples", lo, hi, len(pts))
 	return b.String()
 }
 
