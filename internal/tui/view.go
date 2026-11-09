@@ -262,18 +262,21 @@ func (m Model) ratesLine(width int) string {
 		w := visible(p)
 		switch {
 		case n == 0:
-		case n+3+w > width:
+		case n+visible(rateSep)+w > width:
 			b.WriteString("\n" + strings.Repeat(" ", 13))
 			n = 0
 		default:
-			b.WriteString("   ")
-			n += 3
+			b.WriteString(ansi.Orange(rateSep))
+			n += visible(rateSep)
 		}
 		b.WriteString(p)
 		n += w
 	}
 	return b.String()
 }
+
+// rateSep divides the providers on the rates line; │ is in CP437 and Lat15, "|" elsewhere.
+const rateSep = "  │  "
 
 var sgr = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 

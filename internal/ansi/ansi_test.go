@@ -29,7 +29,10 @@ func TestFont(t *testing.T) {
 	if got := KernelFont.Safe("€14.20 — loading… ≈ $1 · ░"); got != "EUR 14.20 - loading... ≈ $1 · ░" {
 		t.Fatalf("KernelFont.Safe = %q", got)
 	}
-	lat15 := NewFont("€—–…·≈←↑→↓§░▒█─¯") // Debian console-setup Lat15-Fixed16
+	lat15 := NewFont("€—–…·≈←↑→↓§░▒█─¯│") // Debian console-setup Lat15-Fixed16
+	if got := (Font{set: map[rune]bool{}}).Safe("a  │  b"); got != "a  |  b" || KernelFont.Safe("│") != "│" || lat15.Safe("│") != "│" {
+		t.Fatalf("rate separator: %q", got)
+	}
 	if got := lat15.Safe("€1 ▓ ✓"); got != "€1 # ?" {
 		t.Fatalf("lat15.Safe = %q", got)
 	}

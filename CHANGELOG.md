@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.10 — 2026-11-10
+
+- TUI: the rate sources on the `rates` line are divided by an orange `│` (`|` on a console font without it).
+
 ## v0.5.9 — 2026-11-10
 
 - TUI: the XMR rate from three sources at once — CoinGecko, Kraken (the official Monero GUI wallet's default) and CoinPaprika, asked in parallel. A new `rates` line shows each one (stale with the reason when it fails); the `EARNINGS` rate and all USD/EUR amounts use the median of those that answered (spec PRICE-01, UI-07). On a narrow terminal the sources that do not fit move to the next line instead of being cut off (found by an independent Codex review).

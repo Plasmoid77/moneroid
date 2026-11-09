@@ -26,14 +26,14 @@ func NewFont(chars string) Font {
 
 // KernelFont is what Moneroid needs from the kernel's built-in CP437 font, the
 // console's font when console-setup/setfont never loaded another one.
-var KernelFont = NewFont("·≈←↑→↓§░▒▓█▄─▀")
+var KernelFont = NewFont("·≈←↑→↓§░▒▓█▄─▀│")
 
 // Has reports whether f draws r.
 func (f Font) Has(r rune) bool { return f.set == nil || r < 0x7f || f.set[r] }
 
 // spelled stands in for a character the font lacks; anything else becomes "?".
 var spelled = map[rune]string{
-	'€': "EUR ", '—': "-", '–': "-", '…': "...", '≈': "~", '·': "|", '§': "sec. ",
+	'€': "EUR ", '—': "-", '–': "-", '…': "...", '≈': "~", '·': "|", '│': "|", '§': "sec. ",
 	'←': "<", '→': ">", '↑': "^", '↓': "v", '█': "#", '▓': "#", '▒': "+", '░': ".",
 }
 

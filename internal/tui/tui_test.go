@@ -155,7 +155,7 @@ func TestRenderDashboardFillsScreen(t *testing.T) {
 		t.Fatalf("dashboard must fill %d rows, got %d", m.height, got)
 	}
 	for _, want := range []string{"moneroid test", "health OK", "14402", "1 payouts", "0.000411000000", "12 pool blocks", "0.175", "12345680", "active/running",
-		"1 XMR = $599.02 · €517.40   median,", "rates      CoinGecko $598.50 · €517.00   Kraken no answer in time   CoinPaprika …", "≈ $0.25 · €0.21", "0.000915 XMR/day ≈ $0.55 · €0.47", "XMR/month ≈ $16.43 · €14.20"} {
+		"1 XMR = $599.02 · €517.40   median,", "rates      CoinGecko $598.50 · €517.00  │  Kraken no answer in time  │  CoinPaprika …", "≈ $0.25 · €0.21", "0.000915 XMR/day ≈ $0.55 · €0.47", "XMR/month ≈ $16.43 · €14.20"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("dashboard lacks %q:\n%s", want, v)
 		}
@@ -262,18 +262,18 @@ func TestPriceSources(t *testing.T) {
 	r, _ = m.Update(priceMsg{{Err: errors.New("CoinGecko: no answer in time")}, {Quote: q(594.3, 528.58)}, {Quote: q(592.7, 528.18)}})
 	m = r.(Model)
 	if m.priceErr != "" || !strings.Contains(plain(m.priceLine()), "1 XMR = $593.50 · €528.38   median, 0s ago") ||
-		plain(m.ratesLine(200)) != "CoinGecko no answer in time   Kraken $594.30 · €528.58   CoinPaprika $592.70 · €528.18" {
+		plain(m.ratesLine(200)) != "CoinGecko no answer in time  │  Kraken $594.30 · €528.58  │  CoinPaprika $592.70 · €528.18" {
 		t.Fatalf("two answered:\n%q\n%q", plain(m.priceLine()), plain(m.ratesLine(200)))
 	}
 
 	r, cmd = m.Update(priceMsg{{Err: errors.New("CoinGecko: HTTP 429")}, {Err: errors.New("Kraken: HTTP 503")}, {Err: errors.New("CoinPaprika: HTTP 429")}})
 	m = r.(Model)
 	if cmd == nil || !strings.Contains(plain(m.priceLine()), "$593.50 · €528.38   median, 0s ago   stale: no source answers") ||
-		plain(m.ratesLine(200)) != "CoinGecko HTTP 429   Kraken $594.30 · €528.58 stale: HTTP 503   CoinPaprika $592.70 · €528.18 stale: HTTP 429" {
+		plain(m.ratesLine(200)) != "CoinGecko HTTP 429  │  Kraken $594.30 · €528.58 stale: HTTP 503  │  CoinPaprika $592.70 · €528.18 stale: HTTP 429" {
 		t.Fatalf("stale:\n%q\n%q", plain(m.priceLine()), plain(m.ratesLine(200)))
 	}
 	// At 80 columns (67 after the label) the providers that do not fit move under the first.
-	if got := plain(m.ratesLine(80 - 13)); got != "CoinGecko HTTP 429   Kraken $594.30 · €528.58 stale: HTTP 503\n             CoinPaprika $592.70 · €528.18 stale: HTTP 429" {
+	if got := plain(m.ratesLine(80 - 13)); got != "CoinGecko HTTP 429  │  Kraken $594.30 · €528.58 stale: HTTP 503\n             CoinPaprika $592.70 · €528.18 stale: HTTP 429" {
 		t.Fatalf("wrapped:\n%s", got)
 	}
 	// 80×24 with a warning: the rates take only the free rows, the issue and the footer stay.
