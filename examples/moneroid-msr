@@ -1,0 +1,80 @@
+#!/bin/sh
+# moneroid-msr apply|restore|preset — the RandomX "MSR mod" that XMRig applies itself only
+# when it runs as root; Moneroid runs it unprivileged, so moneroid-msr.service does it instead.
+# Registers, values and the CPU mapping are XMRig 6.26.0's (src/crypto/rx/RxConfig.cpp,
+# src/backend/cpu/platform/BasicCpuInfo.cpp). Needs msr-tools and the msr kernel module.
+#   apply    save the current values (once per boot) and write the preset to every CPU
+#   restore  write the saved values back to every CPU
+#   preset   print the preset for this CPU ("register value [kept-bit]"), exit 1 if none
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+SAVED=/run/moneroid-msr.saved
+
+cpu_field() { sed -n "s/^$1[[:space:]]*: //p" /proc/cpuinfo | head -n 1; }
+
+# A third column is a bit kept from the current value: XMRig writes 0xc0011021 under the mask ~0x20.
+preset() {
+	case $(cpu_field vendor_id) in
+	GenuineIntel) echo '0x1a4 0xf' ;;
+	AuthenticAMD)
+		# /proc/cpuinfo has family and model in decimal: 0x17 = 23, 0x19 = 25, 0x1a = 26, 0x61 = 97, 0x75 = 117.
+		case $(cpu_field 'cpu family') in
+		23) printf '%s\n' '0xc0011020 0x0' '0xc0011021 0x40 5' '0xc0011022 0x1510000' '0xc001102b 0x2000cc16' ;; # Zen, Zen+, Zen 2
+		25) case $(cpu_field model) in
+			97 | 117) printf '%s\n' '0xc0011020 0x4400000000000' '0xc0011021 0x4000000000040 5' '0xc0011022 0x8680000401570000' '0xc001102b 0x2040cc10' ;; # Zen 4
+			*) printf '%s\n' '0xc0011020 0x4480000000000' '0xc0011021 0x1c000200000040 5' '0xc0011022 0xc000000401570000' '0xc001102b 0x2000cc10' ;; # Zen 3
+			esac ;;
+		26) printf '%s\n' '0xc0011020 0x4400000000000' '0xc0011021 0x4000000000040 5' '0xc0011022 0x8680000401570000' '0xc001102b 0x2040cc10' ;; # Zen 5
+		*) return 1 ;;
+		esac ;;
+	*) return 1 ;;
+	esac
+}
+
+cpus() { for d in /dev/cpu/[0-9]*; do echo "${d##*/}"; done; }
+
+snapshot_ok() { # every preset register once, each with a hex value
+	[ -s "$SAVED" ] || return 1
+	[ "$(awk 'NF != 2 || $2 !~ /^0x[0-9a-f]+$/ { bad = 1 } END { print NR + 0, bad + 0 }' "$SAVED")" = "$(echo "$1" | wc -l) 0" ]
+}
+
+case ${1:-} in
+preset) preset ;;
+apply)
+	p=$(preset) || { echo "moneroid-msr: no MSR preset for this CPU" >&2; exit 1; }
+	# The first apply of a boot keeps the firmware values; a repeated apply must not save the modded ones.
+	if [ ! -e "$SAVED" ]; then
+		: > "$SAVED.tmp"
+		for reg in $(echo "$p" | cut -d ' ' -f 1); do
+			old=$(rdmsr -p 0 -c "$reg") || { rm -f "$SAVED.tmp"; echo "moneroid-msr: cannot read $reg" >&2; exit 1; }
+			echo "$reg $old" >> "$SAVED.tmp"
+		done
+		mv "$SAVED.tmp" "$SAVED"
+	fi
+	snapshot_ok "$p" || { echo "moneroid-msr: $SAVED is incomplete or malformed; reboot to start clean" >&2; exit 1; }
+	# A failure here fails the unit; ExecStopPost then writes the saved values back.
+	echo "$p" | while read -r reg value keep; do
+		if [ -z "$keep" ]; then wrmsr -a "$reg" "$value"; continue; fi
+		# Only that bit is read (a full value may exceed the shell's signed 64-bit arithmetic);
+		# the preset values have it clear and stay below 2^63.
+		for c in $(cpus); do
+			bit=$(rdmsr -p "$c" -u -f "$keep:$keep" "$reg")
+			wrmsr -p "$c" "$reg" "$(printf '0x%x' $((value | (bit << keep))))"
+		done
+	done
+	echo "moneroid-msr: preset applied ($(echo "$p" | wc -l) registers, originals in $SAVED)"
+	;;
+restore)
+	[ -e "$SAVED" ] || { echo "moneroid-msr: nothing saved, nothing to restore"; exit 0; }
+	# Every register on every CPU is tried; the snapshot goes only when all of them were written back.
+	failed=0
+	while read -r reg value; do
+		case $value in 0x[0-9a-f]*) ;; *) failed=1; continue ;; esac
+		for c in $(cpus); do wrmsr -p "$c" "$reg" "$value" || failed=1; done
+	done < "$SAVED"
+	[ $failed = 0 ] || { echo "moneroid-msr: some values were not restored; $SAVED kept" >&2; exit 1; }
+	rm -f "$SAVED"
+	echo "moneroid-msr: original values restored"
+	;;
+*) echo "usage: moneroid-msr apply|restore|preset" >&2; exit 2 ;;
+esac

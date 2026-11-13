@@ -76,8 +76,11 @@ UNITS="moneroid-p2pool.service moneroid-xmrig.service"
 if [ $UNINSTALL = 1 ]; then
 	# The guard goes first so it cannot restart what is being removed.
 	for u in moneroid-guard.service $UNITS moneroid-msr.service; do systemctl disable --now "$u" 2>/dev/null || true; done # one missing unit must not skip the rest
+	# The MSR helper stays while values it saved are still unrestored: it is the way back (or reboot).
+	if [ -e /run/moneroid-msr.saved ]; then echo "note: MSR values not restored; kept moneroid-msr and its unit (reboot, then re-run --uninstall)"
+	else rm -f /etc/systemd/system/moneroid-msr.service /usr/local/libexec/moneroid-msr; fi
 	rm -f /etc/systemd/system/moneroid-guard.service /etc/systemd/system/moneroid-p2pool.service /etc/systemd/system/moneroid-xmrig.service \
-		/etc/systemd/system/moneroid-msr.service /etc/polkit-1/rules.d/50-moneroid.rules \
+		/etc/polkit-1/rules.d/50-moneroid.rules \
 		/etc/sysctl.d/90-moneroid-hugepages.conf /usr/local/bin/moneroid /usr/local/bin/p2pool /usr/local/bin/xmrig \
 		/var/lib/moneroid/install-restart-pending
 	systemctl daemon-reload
@@ -316,14 +319,29 @@ if [ $HUGEPAGES = 1 ]; then
 	printf 'vm.nr_hugepages = %s\n' "$nr" > /etc/sysctl.d/90-moneroid-hugepages.conf
 	sysctl -q -p /etc/sysctl.d/90-moneroid-hugepages.conf || true
 	echo "hugepages: vm.nr_hugepages=$nr (fully effective after a reboot)"
-	if grep -q GenuineIntel /proc/cpuinfo; then
-		if ! command -v wrmsr >/dev/null; then
+	if sh examples/moneroid-msr preset >/dev/null 2>&1; then # Intel or AMD Ryzen Zen 1–5
+		if ! command -v wrmsr >/dev/null || ! command -v rdmsr >/dev/null; then
 			if command -v apt-get >/dev/null; then { apt-get update -qq && apt-get install -y -qq msr-tools; } >/dev/null 2>&1 || true
 			elif command -v pacman >/dev/null; then pacman -S --noconfirm --needed msr-tools >/dev/null 2>&1 || true; fi
 		fi
-		if command -v wrmsr >/dev/null; then
-			install -o root -g root -m 0644 examples/moneroid-msr.service /etc/systemd/system/
-			systemctl enable -q --now moneroid-msr.service
+		if command -v wrmsr >/dev/null && command -v rdmsr >/dev/null; then
+			msr=/etc/systemd/system/moneroid-msr.service msr_bin=/usr/local/libexec/moneroid-msr
+			if ! cmp -s examples/moneroid-msr.service $msr || ! cmp -s examples/moneroid-msr $msr_bin; then
+				# Stopped with the unit systemd still has loaded, so its own stop command undoes its own
+				# values (the Intel-only unit before v0.6.1 had no saved values to restore). Replaced only
+				# after a clean stop: a new apply would otherwise save modded values as the originals.
+				was=$(systemctl is-active moneroid-msr.service 2>/dev/null) || :
+				systemctl reset-failed moneroid-msr.service 2>/dev/null || :
+				[ "$was" != active ] || systemctl stop moneroid-msr.service 2>/dev/null || :
+				if systemctl is-active -q moneroid-msr.service || systemctl is-failed -q moneroid-msr.service || [ -e /run/moneroid-msr.saved ]; then
+					die "moneroid-msr.service did not restore the MSR values cleanly; see journalctl -u moneroid-msr, reboot and re-run"
+				fi
+				install -d -o root -g root -m 0755 /usr/local/libexec
+				install -o root -g root -m 0755 examples/moneroid-msr $msr_bin
+				install -o root -g root -m 0644 examples/moneroid-msr.service $msr
+				systemctl daemon-reload
+			fi
+			systemctl enable -q --now moneroid-msr.service || echo "note: moneroid-msr.service failed; see journalctl -u moneroid-msr"
 		else echo "note: msr-tools not found; MSR unit skipped"; fi
 	fi
 fi

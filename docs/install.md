@@ -94,9 +94,9 @@ The services run as unprivileged users, so XMRig applies no MSR mod and cannot a
 printf 'vm.nr_hugepages = 1536\n' > /etc/sysctl.d/90-moneroid-hugepages.conf   # 3 GiB: XMRig ~1172 pages + P2Pool light ~270
 ```
 
-`install.sh --hugepages` computes the value from the machine (a RandomX dataset per NUMA node + cache + scratchpads + P2Pool light mode + margin) and installs the MSR unit on Intel.
+`install.sh --hugepages` computes the value from the machine (a RandomX dataset per NUMA node + cache + scratchpads + P2Pool light mode + margin) and installs the MSR unit on Intel and AMD Ryzen (Zen 1–5).
 
-**MSR (Intel only, optional).** As an unprivileged user XMRig prints `FAILED TO APPLY MSR MOD`. The same effect comes from the oneshot unit `examples/moneroid-msr.service` (needs `msr-tools`): `wrmsr -a 0x1a4 0xf` before XMRig starts, rollback in `ExecStop`. Measured on Zeonux (2×Xeon E5-2683 v4): 13.8 → 14.4 kH/s (+4.5 %). AMD uses different values — do not use this unit there.
+**MSR (Intel and AMD Ryzen, optional).** As an unprivileged user XMRig prints `FAILED TO APPLY MSR MOD`. The same effect comes from the oneshot unit `examples/moneroid-msr.service` with the script `examples/moneroid-msr` (in `/usr/local/libexec/`, needs `msr-tools`): before XMRig starts it saves the current values and writes XMRig's own preset for the CPU (6.26.0: Intel `0x1a4 = 0xf`; AMD family 17h, 19h Zen 3, 19h Zen 4, 1Ah Zen 5 — four registers each); `ExecStop` writes the saved values back. `moneroid-msr preset` prints what it would write. Measured on Zeonux (2×Xeon E5-2683 v4): 13.8 → 14.4 kH/s (+4.5 %).
 
 Hugepages are reliably applied only at boot (on a running system memory is fragmented and `sysctl -w` allocates only part). P2Pool keeps a RandomX dataset of its own (2 GB, ~1200 hugepages); the example `p2pool.conf` enables `light-mode = 1` so the pages go to XMRig. Check: `moneroid doctor` → `XMRIG_HUGEPAGES pass`, and `huge pages 100%` in the XMRig journal. Without it the hashrate is lower; Moneroid only shows this.
 

@@ -19,7 +19,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make check
-      - run: shellcheck -s sh -S warning install.sh
+      - run: shellcheck -s sh -S warning install.sh examples/moneroid-msr
   release:
     # A pushed tag vX.Y.Z publishes dist/ with its CHANGELOG section as the notes.
     if: startsWith(github.ref, 'refs/tags/v')
