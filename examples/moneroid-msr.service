@@ -1,18 +1,21 @@
-# Optional, Intel only: disables the hardware prefetchers (MSR 0x1a4 = 0xf) —
-# what XMRig would do itself as root ("MSR mod"). On a Xeon E5 v4: +4.5 % hashrate.
-# Needs msr-tools. Install to /etc/systemd/system/, then systemctl enable --now moneroid-msr.service
-# Rollback: systemctl disable --now moneroid-msr.service (ExecStop writes 0x0) or reboot.
+# Optional: the RandomX "MSR mod" XMRig applies itself only as root (Intel: HW prefetchers
+# off, MSR 0x1a4 = 0xf; AMD Ryzen Zen 1–5: XMRig's ryzen_* presets) — moneroid-msr picks the
+# preset for this CPU. On a Xeon E5 v4: +4.5 % hashrate. Needs msr-tools.
+# install.sh --hugepages installs both; by hand: examples/moneroid-msr to /usr/local/libexec/
+# (0755), this file to /etc/systemd/system/, then systemctl enable --now moneroid-msr.service
+# Rollback: systemctl disable --now moneroid-msr.service (it writes the saved values back) or reboot.
 [Unit]
-Description=RandomX MSR tweak for XMRig (Intel, disables HW prefetchers)
-Documentation=https://xmrig.com/docs/miner/randomx-optimization-guide
+Description=RandomX MSR mod for XMRig (Intel, AMD Ryzen)
+Documentation=https://xmrig.com/docs/miner/randomx-optimization-guide/msr
 Before=moneroid-xmrig.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStartPre=/sbin/modprobe msr
-ExecStart=/usr/sbin/wrmsr -a 0x1a4 0xf
-ExecStop=/usr/sbin/wrmsr -a 0x1a4 0x0
+ExecStart=/usr/local/libexec/moneroid-msr apply
+# ExecStopPost also runs after a failed start, so a partly applied preset is undone too.
+ExecStopPost=/usr/local/libexec/moneroid-msr restore
 
 [Install]
 WantedBy=multi-user.target

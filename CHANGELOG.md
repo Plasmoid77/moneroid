@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.6.1 — 2026-11-13
+
+- `install.sh --hugepages` now applies the RandomX MSR mod on AMD Ryzen too (Zen 1–5), not only on Intel. The new helper `moneroid-msr` (in `/usr/local/libexec/`, run by `moneroid-msr.service`) writes XMRig 6.26.0's own preset for the CPU — the same registers and values XMRig writes when it runs as root — after saving the current values, and writes the saved values back when the unit stops, also after a failed start. `moneroid-msr preset` prints what it would write.
+- Upgrading from the Intel-only unit stops it first (its own stop command resets `0x1a4`), and a unit that did not restore cleanly stops the run instead of saving modded values as the originals. `--uninstall` keeps the helper while values are still unrestored.
+
 ## v0.6.0 — 2026-11-10
 
 From a full review of the repository together with an independent Codex review.
